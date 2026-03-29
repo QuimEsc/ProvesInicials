@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ca">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>Dashboard de borsa</title>
+    <meta name="description" content="Dashboard de borsa estàtic per a GitHub Pages amb Lightweight Charts." />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="text/javascript" src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar">
+        <div class="control ticker-control">
+          <label for="tickerSelect">Actiu</label>
+          <select id="tickerSelect"></select>
+        </div>
+
+        <div class="control timeframe-control">
+          <label for="timeframeSelect">Timeframe</label>
+          <select id="timeframeSelect">
+            <option value="D">Diari</option>
+            <option value="W">Setmanal</option>
+          </select>
+        </div>
+
+        <div class="control actions-control">
+          <label>&nbsp;</label>
+          <button id="resetZoomBtn" type="button">Reset zoom</button>
+        </div>
+
+        <div class="control meta-control">
+          <label>Estat</label>
+          <div id="statusText" class="status">Carregant dades...</div>
+        </div>
+
+        <div class="toggle-group">
+          <div class="toggle-group-title">Indicadors visibles</div>
+          <label class="toggle"><input id="toggleBlueZones" type="checkbox" checked /> Zones blaves</label>
+          <label class="toggle"><input id="toggleRedZones" type="checkbox" checked /> Zones roges</label>
+          <label class="toggle"><input id="toggleBuyLines" type="checkbox" checked /> Línies compra</label>
+          <label class="toggle"><input id="toggleSellLines" type="checkbox" checked /> Línies venda</label>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div class="metric-card">
+          <div class="metric-label">Actiu seleccionat</div>
+          <div id="metricName" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Últim tancament</div>
+          <div id="metricClose" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Pròxima línia de compra</div>
+          <div id="metricBuyLine" class="metric-value">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Distància %</div>
+          <div id="metricPct" class="metric-value">-</div>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="charts-column">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Preu + línies + zones</div>
+                <div class="panel-subtitle" id="mainChartSubtitle">-</div>
+              </div>
+              <div class="badge" id="timeframeBadge">Diari</div>
+            </div>
+            <div class="chart-wrapper" id="mainChartWrapper">
+              <div id="mainChart" class="chart-host"></div>
+              <div id="mainZoneOverlay" class="zone-overlay"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Anàlisi relativa</div>
+                <div class="panel-subtitle" id="ratioChartSubtitle">Base 100</div>
+              </div>
+            </div>
+            <div class="chart-wrapper ratio" id="ratioChartWrapper">
+              <div id="ratioChart" class="chart-host"></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="table-column">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Taula resum</div>
+                <div class="panel-subtitle">Ordenada per menor distància a la següent compra</div>
+              </div>
+              <div class="badge" id="summaryUpdatedBadge">-</div>
+            </div>
+            <div class="table-wrap" id="summaryWrap">
+              <table class="summary-table">
+                <thead>
+                  <tr>
+                    <th>Nom</th>
+                    <th>Ticker</th>
+                    <th>Close</th>
+                    <th>Línia</th>
+                    <th>Compra</th>
+                    <th>% dist.</th>
+                  </tr>
+                </thead>
+                <tbody id="summaryTableBody"></tbody>
+              </table>
+            </div>
+            <div id="summaryEmpty" class="empty-state" hidden>Encara no hi ha dades generades.</div>
+          </section>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        Publicació estàtica per a GitHub Pages. Les dades es regeneren amb GitHub Actions.
+      </div>
+    </div>
+  </body>
+</html>
