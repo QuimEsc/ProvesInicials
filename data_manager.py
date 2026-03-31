@@ -1,6 +1,9 @@
 import os
 import re
-from typing import Dict, Tuple
+import time
+import random
+import threading
+from typing import Dict, Iterable, Tuple
 
 import pandas as pd
 
@@ -9,35 +12,65 @@ try:
 except ImportError:  # pragma: no cover
     yf = None
 
+try:
+    import requests
+except ImportError:  # pragma: no cover
+    requests = None
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Manté exactament el mateix nom de carpeta
 CARPETA_DADES = os.environ.get("DADES_FOLDER", os.path.join(BASE_DIR, "dades_historiques"))
 
-REFRESH_INTERVAL_MINUTES = 30
+# Cada quant temps es considera "fresc" el CSV local / memòria cau
+REFRESH_INTERVAL_MINUTES = int(os.environ.get("REFRESH_INTERVAL_MINUTES", "30"))
 
-# Nombre de dies recents que es tornen a descarregar i sobreescriure.
-RECENT_REFRESH_DAYS = 5
+# Nombre de dies recents que es tornen a descarregar i sobreescriure
+# per actualitzar correctament la vela diària actual i els últims dies.
+RECENT_REFRESH_DAYS = int(os.environ.get("RECENT_REFRESH_DAYS", "5"))
 
-# Configuració de descàrrega
-FULL_DOWNLOAD_PERIOD = "max"
-YF_INTERVAL = "1d"
+# Configuració de Yahoo Finance
+FULL_DOWNLOAD_PERIOD = os.environ.get("FULL_DOWNLOAD_PERIOD", "max")
+YF_INTERVAL = "1d"  # IMPORTANT: vela diària actualitzada al llarg del dia
 YF_AUTO_ADJUST = False
 YF_REPAIR = False
+YF_PREPOST = False
+YF_ACTIONS = False
+YF_TIMEOUT_SECONDS = float(os.environ.get("YF_TIMEOUT_SECONDS", "20"))
+
+# Reintents / backoff
+MAX_RETRIES = int(os.environ.get("YF_MAX_RETRIES", "4"))
+BASE_BACKOFF_SECONDS = float(os.environ.get("YF_BASE_BACKOFF_SECONDS", "2.0"))
+RATE_LIMIT_BACKOFF_SECONDS = float(os.environ.get("YF_RATE_LIMIT_BACKOFF_SECONDS", "20.0"))
+
+# Throttle global per reduir risc de bloqueig
+MIN_SECONDS_BETWEEN_REQUESTS = float(os.environ.get("YF_MIN_SECONDS_BETWEEN_REQUESTS", "1.2"))
+RANDOM_JITTER_SECONDS = float(os.environ.get("YF_RANDOM_JITTER_SECONDS", "0.8"))
 
 # Logs en consola
-ENABLE_LOGS = str(os.environ.get("ENABLE_DATA_MANAGER_LOGS", "1")).strip().lower() not in {"0", "false", "no", "off"}
+ENABLE_LOGS = str(os.environ.get("ENABLE_DATA_MANAGER_LOGS", "1")).strip().lower() not in {
+    "0", "false", "no", "off"
+}
 
 os.makedirs(CARPETA_DADES, exist_ok=True)
 
 _CACHE_MEMORIA: Dict[str, Tuple[pd.DataFrame, pd.Timestamp]] = {}
+_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST_TS: float = 0.0
+
+# Sessió HTTP reutilitzable (si requests està disponible)
+_HTTP_SESSION = requests.Session() if requests is not None else None
 
 
 def _log(msg: str) -> None:
     if ENABLE_LOGS:
         now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[data_manager {now}] {msg}")
+
+
+def _normalize_ticker(ticker: str) -> str:
+    return str(ticker).strip().upper()
 
 
 def _safe_filename(ticker: str) -> str:
@@ -71,6 +104,10 @@ def _is_timestamp_fresh(ts: pd.Timestamp | None) -> bool:
 
 
 def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Este gestor està pensat per a guardar una única vela diària per data.
+    Per tant, l'índex es normalitza a data i, si hi haguera duplicats, es conserva l'últim.
+    """
     if df.empty:
         out = df.copy()
         out.index = pd.DatetimeIndex([], name="Date")
@@ -86,8 +123,8 @@ def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
     out = out[~out.index.isna()].copy()
     out = out.sort_index()
 
-    # En dades diàries volem una sola fila per data.
-    # Si hi ha dos timestamps del mateix dia, ens quedem amb l'últim.
+    # IMPORTANT:
+    # Volem una sola fila per dia, perquè l'objectiu és la vela diària actualitzada.
     out.index = out.index.normalize()
     out = out[~out.index.duplicated(keep="last")].copy()
 
@@ -134,6 +171,10 @@ def _ensure_ohlcv_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _fill_synthetic_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ompli camps mínims si Yahoo o un CSV manual ve incomplet.
+    No inventa High/Low: si falten, es descarta la fila perquè no tindria sentit com a OHLC.
+    """
     out = _ensure_ohlcv_schema(df)
 
     if out.empty:
@@ -156,6 +197,13 @@ def _fill_synthetic_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _merge_frames_by_date(*dfs: pd.DataFrame) -> pd.DataFrame:
+    """
+    Concatena i deduplica per data conservant l'última aparició.
+    Això permet:
+    - conservar files locals antigues
+    - conservar files locals recents si Yahoo no les torna
+    - sobreescriure solapaments amb la descàrrega més recent
+    """
     valid = []
     for df in dfs:
         if df is None:
@@ -190,19 +238,68 @@ def _last_candle_signature(df: pd.DataFrame):
     )
 
 
-def _download_from_yahoo(
+def _wait_before_request() -> None:
+    """
+    Throttle global senzill per evitar massa peticions seguides.
+    """
+    global _LAST_REQUEST_TS
+
+    with _REQUEST_LOCK:
+        now = time.monotonic()
+        elapsed = now - _LAST_REQUEST_TS
+        wait_needed = max(0.0, MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
+
+        if wait_needed > 0:
+            time.sleep(wait_needed)
+
+        jitter = random.uniform(0.0, max(0.0, RANDOM_JITTER_SECONDS))
+        if jitter > 0:
+            time.sleep(jitter)
+
+        _LAST_REQUEST_TS = time.monotonic()
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    msg = f"{type(exc).__name__}: {exc}".lower()
+    patterns = [
+        "429",
+        "too many requests",
+        "rate limit",
+        "rate-limited",
+        "ratelimit",
+        "temporarily blocked",
+        "forbidden",
+    ]
+    return any(p in msg for p in patterns)
+
+
+def _build_ticker_object(ticker: str):
+    if yf is None:
+        raise ImportError("Falta yfinance. Instal·la yfinance o puja els CSV manuals.")
+
+    if _HTTP_SESSION is not None:
+        return yf.Ticker(ticker, session=_HTTP_SESSION)
+    return yf.Ticker(ticker)
+
+
+def _download_from_yahoo_once(
     ticker: str,
     *,
     start: str | None = None,
     period: str | None = None,
 ) -> pd.DataFrame:
+    _wait_before_request()
+
+    tk = _build_ticker_object(ticker)
+
     kwargs = {
-        "tickers": ticker,
         "interval": YF_INTERVAL,
         "auto_adjust": YF_AUTO_ADJUST,
         "repair": YF_REPAIR,
-        "progress": False,
-        "threads": False,
+        "prepost": YF_PREPOST,
+        "actions": YF_ACTIONS,
+        "timeout": YF_TIMEOUT_SECONDS,
+        "raise_errors": True,
     }
 
     if start is not None:
@@ -210,10 +307,7 @@ def _download_from_yahoo(
     else:
         kwargs["period"] = period or FULL_DOWNLOAD_PERIOD
 
-    if yf is None:
-        raise ImportError("Falta yfinance. Instal·la yfinance o puja els CSV manuals.")
-
-    df = yf.download(**kwargs)
+    df = tk.history(**kwargs)
 
     if df is None or df.empty:
         return _empty_ohlcv_df()
@@ -221,6 +315,42 @@ def _download_from_yahoo(
     df = _ensure_ohlcv_schema(df)
     df = _fill_synthetic_ohlcv(df)
     return df
+
+
+def _download_from_yahoo(
+    ticker: str,
+    *,
+    start: str | None = None,
+    period: str | None = None,
+) -> pd.DataFrame:
+    last_exc = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return _download_from_yahoo_once(ticker, start=start, period=period)
+
+        except KeyboardInterrupt:  # pragma: no cover
+            raise
+        except Exception as exc:
+            last_exc = exc
+
+            if attempt >= MAX_RETRIES:
+                break
+
+            if _is_rate_limit_error(exc):
+                sleep_s = RATE_LIMIT_BACKOFF_SECONDS * attempt + random.uniform(0.0, RANDOM_JITTER_SECONDS)
+            else:
+                sleep_s = BASE_BACKOFF_SECONDS * (2 ** (attempt - 1)) + random.uniform(
+                    0.0, RANDOM_JITTER_SECONDS
+                )
+
+            _log(
+                f"{ticker}: error en descàrrega (intent {attempt}/{MAX_RETRIES}): {exc}. "
+                f"Reintentant en {sleep_s:.1f}s"
+            )
+            time.sleep(sleep_s)
+
+    raise RuntimeError(f"No s'han pogut descarregar dades de Yahoo per a {ticker}: {last_exc}")
 
 
 def _download_full_and_recent(ticker: str) -> pd.DataFrame:
@@ -257,8 +387,12 @@ def _read_local_csv(path: str) -> pd.DataFrame:
 
 def _refresh_recent_window(ticker: str, df_local: pd.DataFrame) -> pd.DataFrame:
     """
-    Manté intacte l'històric antic del CSV local i només substitueix els últims dies.
-    Açò és ideal quan el CSV ve de diverses fonts i és la teua font de veritat.
+    Manté intacte l'històric antic del CSV local i actualitza la finestra recent.
+
+    IMPORTANT:
+    - conserva recents locals si Yahoo no els torna
+    - Yahoo sobreescriu les dates solapades
+    - és ideal per a la vela diària d'avui, que va canviant al llarg del dia
     """
     df_local = _fill_synthetic_ohlcv(df_local)
 
@@ -285,21 +419,18 @@ def _refresh_recent_window(ticker: str, df_local: pd.DataFrame) -> pd.DataFrame:
         )
         return df_local
 
-    merged = _merge_frames_by_date(older_local, df_recent)
+    merged = _merge_frames_by_date(older_local, recent_local, df_recent)
     new_last_sig = _last_candle_signature(merged)
-
-    last_candle_replaced = old_last_sig != new_last_sig
 
     _log(
         f"{ticker}: refrescats últims {RECENT_REFRESH_DAYS} dies "
         f"(des de {recent_start}); "
         f"local_recent={len(recent_local)} files, "
         f"downloaded_recent={len(df_recent)} files, "
-        f"final={len(merged)} files, "
-        f"última vela substituïda={'Sí' if last_candle_replaced else 'No'}"
+        f"final={len(merged)} files"
     )
 
-    if last_candle_replaced:
+    if old_last_sig != new_last_sig:
         _log(f"{ticker}: última vela antiga={old_last_sig} -> nova={new_last_sig}")
 
     return merged
@@ -308,10 +439,44 @@ def _refresh_recent_window(ticker: str, df_local: pd.DataFrame) -> pd.DataFrame:
 def _save_local_csv(path: str, df: pd.DataFrame) -> None:
     out = _fill_synthetic_ohlcv(df)
     out.index.name = "Date"
-    out.to_csv(path)
+
+    tmp_path = f"{path}.tmp"
+    out.to_csv(tmp_path)
+    os.replace(tmp_path, path)
+
+
+def _to_output_schema(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.rename(
+        columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume",
+        }
+    ).copy()
+    out.index.name = "Date"
+    return out
+
+
+def clear_memory_cache() -> None:
+    _CACHE_MEMORIA.clear()
 
 
 def get_data(ticker: str, force_refresh: bool = False) -> pd.DataFrame:
+    """
+    Retorna la sèrie OHLCV diària del ticker.
+
+    Objectiu funcional:
+    - l'històric és diari
+    - la vela del dia actual es va actualitzant quan es refresca
+    - els últims RECENT_REFRESH_DAYS es tornen a descarregar i sobreescriure
+    """
+    ticker = _normalize_ticker(ticker)
+
+    if not ticker:
+        raise ValueError("Ticker buit o invàlid.")
+
     now = _utc_now_naive()
 
     if (not force_refresh) and ticker in _CACHE_MEMORIA:
@@ -326,14 +491,29 @@ def get_data(ticker: str, force_refresh: bool = False) -> pd.DataFrame:
         df_local = _read_local_csv(path)
         file_ts = _file_timestamp_utc(path)
 
-        if force_refresh or not _is_timestamp_fresh(file_ts):
+        # Si el CSV està corrupte o buit, intentem reconstruir-lo.
+        local_needs_refresh = df_local.empty or force_refresh or not _is_timestamp_fresh(file_ts)
+
+        if local_needs_refresh:
             if force_refresh:
                 _log(f"{ticker}: force_refresh=True, refrescant dades")
+            elif df_local.empty:
+                _log(f"{ticker}: CSV local buit/corrupte, reconstruint dades")
             else:
                 _log(f"{ticker}: CSV antic, refrescant dades")
 
-            df = _refresh_recent_window(ticker, df_local)
-            _save_local_csv(path, df)
+            try:
+                df = _refresh_recent_window(ticker, df_local)
+                _save_local_csv(path, df)
+            except Exception as exc:
+                if not df_local.empty:
+                    _log(
+                        f"{ticker}: error refrescant des de Yahoo ({exc}). "
+                        f"Es manté temporalment el CSV local."
+                    )
+                    df = df_local
+                else:
+                    raise
         else:
             _log(f"{ticker}: usant CSV local recent sense refrescar")
             df = df_local
@@ -346,17 +526,32 @@ def get_data(ticker: str, force_refresh: bool = False) -> pd.DataFrame:
         raise ValueError(f"No s'han pogut obtindre dades per a {ticker}.")
 
     df = _fill_synthetic_ohlcv(df)
+    out = _to_output_schema(df)
 
-    out = df.rename(
-        columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        }
-    )
-    out.index.name = "Date"
-
-    _CACHE_MEMORIA[ticker] = (out.copy(), now)
+    _CACHE_MEMORIA[ticker] = (out.copy(), _utc_now_naive())
     return out.copy()
+
+
+def get_many_data(
+    tickers: Iterable[str],
+    force_refresh: bool = False,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Actualitza o llig diversos tickers de manera seqüencial.
+    Això evita pics de peticions i és més amable amb Yahoo que fer-ho tot en paral·lel.
+    """
+    results: Dict[str, pd.DataFrame] = {}
+    seen = set()
+
+    for raw_ticker in tickers:
+        ticker = _normalize_ticker(raw_ticker)
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+
+        try:
+            results[ticker] = get_data(ticker, force_refresh=force_refresh)
+        except Exception as exc:
+            _log(f"{ticker}: error definitiu: {exc}")
+
+    return results
