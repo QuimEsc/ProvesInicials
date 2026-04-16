@@ -16,9 +16,9 @@ import logic_ratio
 import logic_red
 
 ARXIU_TICKERS = "llista_tickers.csv"
-DENOMINADOR = "QDV5.DE"
-RANG_C = 880
-RANG_V = 880
+DENOMINADOR = "^VIX"
+RANG_C = 850
+RANG_V = 850
 WEEKLY_RULE = "W-FRI"
 TIMEFRAME_OPTIONS = ["D", "W"]
 
