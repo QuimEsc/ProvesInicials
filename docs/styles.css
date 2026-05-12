@@ -188,6 +188,10 @@ body {
   height: 240px;
 }
 
+.chart-wrapper.vix {
+  height: 220px;
+}
+
 .chart-host {
   position: absolute;
   inset: 0;
@@ -198,6 +202,7 @@ body {
   left: 0;
   right: 0;
   top: 0;
+  z-index: 2;
   pointer-events: none;
 }
 
@@ -334,5 +339,9 @@ body {
 
   .chart-wrapper.ratio {
     height: 220px;
+  }
+
+  .chart-wrapper.vix {
+    height: 200px;
   }
 }

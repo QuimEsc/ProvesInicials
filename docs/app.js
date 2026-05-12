@@ -14,12 +14,14 @@
     metricPct: document.getElementById('metricPct'),
     mainChartSubtitle: document.getElementById('mainChartSubtitle'),
     ratioChartSubtitle: document.getElementById('ratioChartSubtitle'),
+    vixChartSubtitle: document.getElementById('vixChartSubtitle'),
     timeframeBadge: document.getElementById('timeframeBadge'),
     summaryUpdatedBadge: document.getElementById('summaryUpdatedBadge'),
     summaryTableBody: document.getElementById('summaryTableBody'),
     summaryEmpty: document.getElementById('summaryEmpty'),
     mainChartWrapper: document.getElementById('mainChartWrapper'),
     ratioChartWrapper: document.getElementById('ratioChartWrapper'),
+    vixChartWrapper: document.getElementById('vixChartWrapper'),
     mainZoneOverlay: document.getElementById('mainZoneOverlay'),
   };
 
@@ -27,6 +29,7 @@
     manifest: null,
     summary: null,
     tickerData: null,
+    vixData: null,
     activeSlug: null,
     syncingRange: false,
     zoneRedrawQueued: false,
@@ -81,6 +84,14 @@
       handleScale: true,
     });
 
+    const vixChart = LightweightCharts.createChart(document.getElementById('vixChart'), {
+      ...commonOptions,
+      width: dom.vixChartWrapper.clientWidth,
+      height: dom.vixChartWrapper.clientHeight,
+      handleScroll: true,
+      handleScale: true,
+    });
+
     const mainSeries = mainChart.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#26a69a',
       downColor: '#ef5350',
@@ -97,6 +108,14 @@
       borderVisible: false,
       wickUpColor: '#60a5fa',
       wickDownColor: '#f87171',
+      priceLineVisible: false,
+      lastValueVisible: true,
+    });
+
+    const vixSeries = vixChart.addSeries(LightweightCharts.LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 2,
+      crosshairMarkerVisible: true,
       priceLineVisible: false,
       lastValueVisible: true,
     });
@@ -126,31 +145,24 @@
     const resizeObserver = new ResizeObserver(() => {
       mainChart.resize(dom.mainChartWrapper.clientWidth, dom.mainChartWrapper.clientHeight);
       ratioChart.resize(dom.ratioChartWrapper.clientWidth, dom.ratioChartWrapper.clientHeight);
+      vixChart.resize(dom.vixChartWrapper.clientWidth, dom.vixChartWrapper.clientHeight);
       queueZoneRedraw();
     });
     resizeObserver.observe(dom.mainChartWrapper);
     resizeObserver.observe(dom.ratioChartWrapper);
+    resizeObserver.observe(dom.vixChartWrapper);
 
-    mainChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (state.syncingRange || !range) return;
-      state.syncingRange = true;
-      ratioChart.timeScale().setVisibleLogicalRange(range);
-      state.syncingRange = false;
-      queueZoneRedraw();
-    });
-
-    ratioChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (state.syncingRange || !range) return;
-      state.syncingRange = true;
-      mainChart.timeScale().setVisibleLogicalRange(range);
-      state.syncingRange = false;
-      queueZoneRedraw();
-    });
+    mainChart.timeScale().subscribeVisibleTimeRangeChange((range) => syncVisibleTimeRange(mainChart, range));
+    ratioChart.timeScale().subscribeVisibleTimeRangeChange((range) => syncVisibleTimeRange(ratioChart, range));
+    vixChart.timeScale().subscribeVisibleTimeRangeChange((range) => syncVisibleTimeRange(vixChart, range));
+    mainChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncVisibleLogicalRange(mainChart, range));
+    ratioChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncVisibleLogicalRange(ratioChart, range));
+    vixChart.timeScale().subscribeVisibleLogicalRangeChange((range) => syncVisibleLogicalRange(vixChart, range));
 
     mainChart.timeScale().subscribeVisibleTimeRangeChange(queueZoneRedraw);
     mainChart.subscribeCrosshairMove(queueZoneRedraw);
 
-    return { mainChart, ratioChart, mainSeries, ratioSeries, lineSeries };
+    return { mainChart, ratioChart, vixChart, mainSeries, ratioSeries, vixSeries, lineSeries };
   }
 
   function attachEvents() {
@@ -163,8 +175,7 @@
     dom.toggleBuyLines.addEventListener('change', renderActiveTicker);
     dom.toggleSellLines.addEventListener('change', renderActiveTicker);
     dom.resetZoomBtn.addEventListener('click', () => {
-      charts.mainChart.timeScale().fitContent();
-      charts.ratioChart.timeScale().fitContent();
+      fitAllCharts();
       queueZoneRedraw();
     });
   }
@@ -180,6 +191,7 @@
       state.summary = summary;
       populateTickerSelect();
       renderSummaryTable();
+      await loadVixData();
 
       const slugFromUrl = new URLSearchParams(window.location.search).get('ticker');
       const storedSlug = localStorage.getItem('dashboard-active-slug');
@@ -196,6 +208,18 @@
     } catch (error) {
       console.error(error);
       showError(`No s'han pogut carregar les dades inicials: ${error.message}`);
+    }
+  }
+
+  async function loadVixData() {
+    const vixItem = state.manifest?.tickers?.find((item) => item.ticker === '^VIX' || item.name?.toUpperCase() === 'VIX');
+    if (!vixItem?.slug) return;
+
+    try {
+      state.vixData = await fetchJson(`./data/tickers/${vixItem.slug}.json`);
+    } catch (error) {
+      console.warn('No s\'ha pogut carregar el VIX', error);
+      state.vixData = null;
     }
   }
 
@@ -242,8 +266,10 @@
 
     const mainCandles = data[tfKey]?.candles || [];
     const ratioCandles = data[tfKey]?.ratio || [];
+    const vixCandles = state.vixData?.[tfKey]?.candles || [];
     charts.mainSeries.setData(mainCandles);
     charts.ratioSeries.setData(ratioCandles);
+    charts.vixSeries.setData(candlesToLine(vixCandles));
 
     const showBuy = dom.toggleBuyLines.checked && isDaily;
     const showSell = dom.toggleSellLines.checked && isDaily;
@@ -254,8 +280,7 @@
       charts.lineSeries[key].setData(showSell ? (data.daily?.lines?.[key] || []) : []);
     });
 
-    charts.mainChart.timeScale().fitContent();
-    charts.ratioChart.timeScale().fitContent();
+    fitAllCharts();
 
     const meta = data.meta || {};
     const summary = data.summary || {};
@@ -270,6 +295,7 @@
 
     dom.mainChartSubtitle.textContent = tickerLabel;
     dom.ratioChartSubtitle.textContent = `Base 100 vs ${meta.denominator || '-'}`;
+    dom.vixChartSubtitle.textContent = state.vixData?.meta?.ticker ? `${state.vixData.meta.name} (${state.vixData.meta.ticker})` : 'Volatilitat';
     dom.timeframeBadge.textContent = tfLabel;
 
     const updatedText = meta.generated_at ? `Actualitzat: ${formatDateTime(meta.generated_at)}` : 'Actualitzat: -';
@@ -338,19 +364,28 @@
 
     const width = dom.mainChartWrapper.clientWidth;
     const height = overlayHeight;
+    const visibleRange = charts.mainChart.timeScale().getVisibleRange?.();
+    const visiblePriceRange = getVisiblePriceRange(data.daily?.candles || [], visibleRange);
 
     zones.forEach((zone) => {
-      const x1 = charts.mainChart.timeScale().timeToCoordinate(zone.start);
-      const x2 = charts.mainChart.timeScale().timeToCoordinate(zone.end);
-      const yTopRaw = charts.mainSeries.priceToCoordinate(Number(zone.high));
-      const yBottomRaw = charts.mainSeries.priceToCoordinate(Number(zone.low));
-
-      if ([x1, x2, yTopRaw, yBottomRaw].some((value) => value === null || Number.isNaN(value))) {
+      const zoneLow = Number(zone.low);
+      const zoneHigh = Number(zone.high);
+      if (!Number.isFinite(zoneLow) || !Number.isFinite(zoneHigh)) {
+        return;
+      }
+      if (visiblePriceRange && (zoneHigh < visiblePriceRange.min || zoneLow > visiblePriceRange.max)) {
         return;
       }
 
-      const left = clamp(Math.min(x1, x2), 0, width);
-      const right = clamp(Math.max(x1, x2), 0, width);
+      const yTopRaw = charts.mainSeries.priceToCoordinate(zoneHigh);
+      const yBottomRaw = charts.mainSeries.priceToCoordinate(zoneLow);
+
+      if ([yTopRaw, yBottomRaw].some((value) => value === null || Number.isNaN(value))) {
+        return;
+      }
+
+      const left = 0;
+      const right = width;
       const top = clamp(Math.min(yTopRaw, yBottomRaw), 0, height);
       const bottom = clamp(Math.max(yTopRaw, yBottomRaw), 0, height);
       const rectWidth = right - left;
@@ -367,9 +402,100 @@
       rect.style.width = `${rectWidth}px`;
       rect.style.height = `${rectHeight}px`;
       rect.style.background = zone.color || 'rgba(255,255,255,0.12)';
-      rect.title = `${zone.role || 'zone'} · ${zone.start} → ${zone.end}`;
+      rect.title = `${zone.role || 'zone'} · ${zone.timeframes || 'D'} · ${formatNumber(zone.low)} - ${formatNumber(zone.high)}`;
       dom.mainZoneOverlay.appendChild(rect);
     });
+  }
+
+  function syncVisibleTimeRange(sourceChart, range) {
+    if (state.syncingRange || !range || range.from === undefined || range.to === undefined) return;
+    state.syncingRange = true;
+    [charts.mainChart, charts.ratioChart, charts.vixChart].forEach((chart) => {
+      if (chart === sourceChart) return;
+      try {
+        chart.timeScale().setVisibleRange(range);
+      } catch (error) {
+        console.debug('No s ha pogut sincronitzar per data', error);
+      }
+    });
+    state.syncingRange = false;
+    queueZoneRedraw();
+  }
+
+  function syncVisibleLogicalRange(sourceChart, range) {
+    if (state.syncingRange || !range || range.from === undefined || range.to === undefined) return;
+    const visibleTimeRange = sourceChart.timeScale().getVisibleRange?.();
+    if (visibleTimeRange?.from !== undefined && visibleTimeRange?.to !== undefined) {
+      syncVisibleTimeRange(sourceChart, visibleTimeRange);
+      return;
+    }
+
+    state.syncingRange = true;
+    [charts.mainChart, charts.ratioChart, charts.vixChart].forEach((chart) => {
+      if (chart === sourceChart) return;
+      try {
+        chart.timeScale().setVisibleLogicalRange(range);
+      } catch (error) {
+        console.debug('No s ha pogut sincronitzar per zoom', error);
+      }
+    });
+    state.syncingRange = false;
+    queueZoneRedraw();
+  }
+
+  function fitAllCharts() {
+    state.syncingRange = true;
+    [charts.mainChart, charts.vixChart, charts.ratioChart].forEach((chart) => {
+      chart.timeScale().fitContent();
+    });
+    state.syncingRange = false;
+  }
+
+  function getVisiblePriceRange(candles, visibleRange) {
+    const visibleCandles = (candles || []).filter((bar) => {
+      if (!bar?.time) return false;
+      if (!visibleRange?.from || !visibleRange?.to) return true;
+      return compareChartTimes(bar.time, visibleRange.from) >= 0 && compareChartTimes(bar.time, visibleRange.to) <= 0;
+    });
+    if (!visibleCandles.length) return null;
+
+    let min = Infinity;
+    let max = -Infinity;
+    visibleCandles.forEach((bar) => {
+      min = Math.min(min, Number(bar.low));
+      max = Math.max(max, Number(bar.high));
+    });
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+      return null;
+    }
+
+    const padding = (max - min) * 0.08;
+    return {
+      min: min - padding,
+      max: max + padding,
+    };
+  }
+
+  function compareChartTimes(a, b) {
+    return chartTimeToStamp(a) - chartTimeToStamp(b);
+  }
+
+  function chartTimeToStamp(value) {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') return Date.parse(`${value}T00:00:00Z`) / 1000;
+    if (value && typeof value === 'object') {
+      return Date.UTC(Number(value.year), Number(value.month) - 1, Number(value.day)) / 1000;
+    }
+    return NaN;
+  }
+
+  function candlesToLine(candles) {
+    return (candles || [])
+      .filter((bar) => bar?.time && bar.close !== null && bar.close !== undefined && !Number.isNaN(Number(bar.close)))
+      .map((bar) => ({
+        time: bar.time,
+        value: Number(bar.close),
+      }));
   }
 
   async function fetchJson(url) {
