@@ -3,7 +3,7 @@ name: Update dashboard data
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "7,37 * * * *"
   push:
     branches:
       - main
@@ -22,11 +22,21 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: update-dashboard-data
+  cancel-in-progress: false
+
 jobs:
   build-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       ENABLE_DATA_MANAGER_LOGS: "1"
+      YF_TIMEOUT_SECONDS: "12"
+      YF_MAX_RETRIES: "2"
+      YF_BASE_BACKOFF_SECONDS: "1.5"
+      YF_RATE_LIMIT_BACKOFF_SECONDS: "8"
+      YF_RANDOM_JITTER_SECONDS: "0.3"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
