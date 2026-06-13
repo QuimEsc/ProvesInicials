@@ -63,6 +63,43 @@
         </div>
       </div>
 
+      <section class="panel rebalance-panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Estratègia cartera</div>
+            <div class="panel-subtitle">MSCI World / Nasdaq-100 / monetari · score BCE/FED</div>
+          </div>
+          <div class="panel-actions">
+            <div class="control compact-control">
+              <label for="officialMemorySelect">Memòria oficial</label>
+              <select id="officialMemorySelect">
+                <option value="friday">Divendres</option>
+                <option value="thursday">Dijous</option>
+              </select>
+            </div>
+            <div class="badge" id="rebalanceUpdatedBadge">-</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="rebalance-table">
+            <thead>
+              <tr>
+                <th>Revisió</th>
+                <th>Data usada</th>
+                <th>Score</th>
+                <th>Règim base</th>
+                <th>Crash ràpid</th>
+                <th>Règim final</th>
+                <th>Pesos objectiu</th>
+                <th>Acció</th>
+              </tr>
+            </thead>
+            <tbody id="rebalanceTableBody"></tbody>
+          </table>
+        </div>
+        <div id="rebalanceEmpty" class="empty-state" hidden>Encara no hi ha dades de rebalanç generades.</div>
+      </section>
+
       <div class="content">
         <div class="charts-column">
           <section class="panel">

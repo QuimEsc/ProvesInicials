@@ -136,13 +136,18 @@ body {
   font-weight: 700;
 }
 
-.metric-value.positive { color: var(--green); }
-.metric-value.negative { color: var(--red); }
+.positive { color: var(--green); }
+.negative { color: var(--red); }
 
 .content {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
   gap: 16px;
+  min-width: 0;
+}
+
+.rebalance-panel {
+  margin-bottom: 16px;
 }
 
 .charts-column,
@@ -150,6 +155,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .panel {
@@ -157,6 +163,7 @@ body {
   border-radius: 14px;
   background: rgba(17, 24, 39, 0.94);
   overflow: hidden;
+  min-width: 0;
 }
 
 .panel-header {
@@ -166,6 +173,23 @@ body {
   align-items: center;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
+}
+
+.panel-actions {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.compact-control {
+  min-width: 170px;
+}
+
+.compact-control select {
+  min-height: 34px;
+  padding: 7px 10px;
 }
 
 .panel-title {
@@ -182,6 +206,7 @@ body {
   position: relative;
   width: 100%;
   height: 520px;
+  overflow: hidden;
 }
 
 .chart-wrapper.ratio {
@@ -217,17 +242,29 @@ body {
 }
 
 .table-wrap {
+  width: 100%;
+  max-width: 100%;
   overflow: auto;
 }
 
-.summary-table {
+.summary-table,
+.rebalance-table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.summary-table {
   min-width: 560px;
 }
 
+.rebalance-table {
+  min-width: 980px;
+}
+
 .summary-table th,
-.summary-table td {
+.summary-table td,
+.rebalance-table th,
+.rebalance-table td {
   padding: 10px 12px;
   border-bottom: 1px solid rgba(51, 65, 85, 0.7);
   text-align: right;
@@ -243,6 +280,21 @@ body {
   text-align: left;
 }
 
+.rebalance-table th:first-child,
+.rebalance-table td:first-child,
+.rebalance-table th:nth-child(4),
+.rebalance-table td:nth-child(4),
+.rebalance-table th:nth-child(5),
+.rebalance-table td:nth-child(5),
+.rebalance-table th:nth-child(6),
+.rebalance-table td:nth-child(6),
+.rebalance-table th:nth-child(7),
+.rebalance-table td:nth-child(7),
+.rebalance-table th:nth-child(8),
+.rebalance-table td:nth-child(8) {
+  text-align: left;
+}
+
 .summary-table tbody tr {
   cursor: pointer;
 }
@@ -253,6 +305,10 @@ body {
 
 .summary-table tbody tr.is-active {
   background: rgba(59, 130, 246, 0.18);
+}
+
+.rebalance-table tbody tr.needs-action {
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .badge {

@@ -12,6 +12,10 @@
     metricClose: document.getElementById('metricClose'),
     metricBuyLine: document.getElementById('metricBuyLine'),
     metricPct: document.getElementById('metricPct'),
+    officialMemorySelect: document.getElementById('officialMemorySelect'),
+    rebalanceUpdatedBadge: document.getElementById('rebalanceUpdatedBadge'),
+    rebalanceTableBody: document.getElementById('rebalanceTableBody'),
+    rebalanceEmpty: document.getElementById('rebalanceEmpty'),
     mainChartSubtitle: document.getElementById('mainChartSubtitle'),
     ratioChartSubtitle: document.getElementById('ratioChartSubtitle'),
     vixChartSubtitle: document.getElementById('vixChartSubtitle'),
@@ -28,6 +32,8 @@
   const state = {
     manifest: null,
     summary: null,
+    rebalance: null,
+    officialMemory: localStorage.getItem('dashboard-official-memory') || 'friday',
     tickerData: null,
     vixData: null,
     activeSlug: null,
@@ -178,19 +184,27 @@
       fitAllCharts();
       queueZoneRedraw();
     });
+    dom.officialMemorySelect.addEventListener('change', (event) => {
+      state.officialMemory = event.target.value || 'friday';
+      localStorage.setItem('dashboard-official-memory', state.officialMemory);
+      renderRebalanceTable();
+    });
   }
 
   async function loadInitialData() {
     try {
       setStatus('Carregant manifest i resum...');
-      const [manifest, summary] = await Promise.all([
+      const [manifest, summary, rebalance] = await Promise.all([
         fetchJson('./data/manifest.json'),
         fetchJson('./data/summary.json'),
+        fetchOptionalJson('./data/rebalance.json'),
       ]);
       state.manifest = manifest;
       state.summary = summary;
+      state.rebalance = rebalance;
       populateTickerSelect();
       renderSummaryTable();
+      renderRebalanceTable();
       await loadVixData();
 
       const slugFromUrl = new URLSearchParams(window.location.search).get('ticker');
@@ -298,7 +312,8 @@
     dom.vixChartSubtitle.textContent = state.vixData?.meta?.ticker ? `${state.vixData.meta.name} (${state.vixData.meta.ticker})` : 'Volatilitat';
     dom.timeframeBadge.textContent = tfLabel;
 
-    const updatedText = meta.generated_at ? `Actualitzat: ${formatDateTime(meta.generated_at)}` : 'Actualitzat: -';
+    const updatedAt = state.manifest?.generated_at || meta.generated_at;
+    const updatedText = updatedAt ? `Actualitzat: ${formatDateTime(updatedAt)}` : 'Actualitzat: -';
     const cadenceText = meta.refresh_interval_minutes ? ` · refresc cada ${meta.refresh_interval_minutes} min` : '';
     setStatus(`${tickerLabel} · ${updatedText}${cadenceText}`);
     dom.summaryUpdatedBadge.textContent = updatedText;
@@ -407,6 +422,47 @@
     });
   }
 
+  function renderRebalanceTable() {
+    const options = state.rebalance?.official_review_options || [];
+    const validValues = options.map((item) => item.value);
+    if (!validValues.includes(state.officialMemory)) {
+      state.officialMemory = state.rebalance?.meta?.default_official_review || 'friday';
+    }
+    dom.officialMemorySelect.value = state.officialMemory;
+
+    const rowsByOfficial = state.rebalance?.rows_by_official_review || {};
+    const rows = rowsByOfficial[state.officialMemory] || state.rebalance?.rows || [];
+    dom.rebalanceTableBody.innerHTML = '';
+    dom.rebalanceEmpty.hidden = rows.length > 0;
+
+    const updatedAt = state.rebalance?.meta?.generated_at || state.manifest?.generated_at;
+    const selectedOption = options.find((item) => item.value === state.officialMemory);
+    const memoryLabel = selectedOption?.label || (state.officialMemory === 'thursday' ? 'Dijous' : 'Divendres');
+    const updatedText = updatedAt ? `Actualitzat: ${formatDateTime(updatedAt)}` : '-';
+    dom.rebalanceUpdatedBadge.textContent = `${updatedText} · memòria ${memoryLabel.toLowerCase()}`;
+
+    rows.forEach((row) => {
+      if (!row?.available) return;
+      const tr = document.createElement('tr');
+      tr.classList.toggle('needs-action', Boolean(row.action_required));
+      tr.innerHTML = `
+        <td>${escapeHtml(row.label || '-')}</td>
+        <td>${escapeHtml(row.date || '-')}</td>
+        <td>${formatScore(row.score)}</td>
+        <td>${escapeHtml(row.base_regime || '-')}</td>
+        <td>${row.crash_fast_armed ? 'Sí' : 'No'}</td>
+        <td>${escapeHtml(row.final_regime || '-')}</td>
+        <td>${formatWeights(row.weights)}</td>
+        <td class="${row.action_required ? 'negative' : 'positive'}">${escapeHtml(row.action || '-')}</td>
+      `;
+      dom.rebalanceTableBody.appendChild(tr);
+    });
+
+    if (!dom.rebalanceTableBody.children.length) {
+      dom.rebalanceEmpty.hidden = false;
+    }
+  }
+
   function syncVisibleTimeRange(sourceChart, range) {
     if (state.syncingRange || !range || range.from === undefined || range.to === undefined) return;
     state.syncingRange = true;
@@ -506,6 +562,15 @@
     return response.json();
   }
 
+  async function fetchOptionalJson(url) {
+    try {
+      return await fetchJson(url);
+    } catch (error) {
+      console.warn(`No s'ha pogut carregar ${url}`, error);
+      return null;
+    }
+  }
+
   function setStatus(message) {
     dom.statusText.textContent = message;
   }
@@ -531,6 +596,34 @@
     return `${new Intl.NumberFormat('ca-ES', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
+    }).format(Number(value))}%`;
+  }
+
+  function formatScore(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '-';
+    }
+    return new Intl.NumberFormat('ca-ES', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(Number(value));
+  }
+
+  function formatWeights(weights) {
+    if (!weights) return '-';
+    return [
+      `World ${formatWeight(weights.world)}`,
+      `Nasdaq ${formatWeight(weights.nasdaq)}`,
+      `Monetari ${formatWeight(weights.cash)}`,
+    ].join(' / ');
+  }
+
+  function formatWeight(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '-';
+    }
+    return `${new Intl.NumberFormat('ca-ES', {
+      maximumFractionDigits: 0,
     }).format(Number(value))}%`;
   }
 
