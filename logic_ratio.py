@@ -4,9 +4,9 @@ import pandas as pd
 from data_manager import get_data
 
 
-def get_ratio_data(base_ticker: str, quote_ticker: str) -> pd.DataFrame:
-    base = get_data(base_ticker).copy()
-    quote = get_data(quote_ticker).copy()
+def calculate_ratio_data(base: pd.DataFrame, quote: pd.DataFrame) -> pd.DataFrame:
+    base = base.copy()
+    quote = quote.copy()
 
     if base.empty or quote.empty:
         raise ValueError("No hi ha dades suficients per al càlcul del ratio.")
@@ -48,3 +48,15 @@ def get_ratio_data(base_ticker: str, quote_ticker: str) -> pd.DataFrame:
     out[time_col] = pd.to_datetime(out[time_col]).dt.strftime("%Y-%m-%d")
     out = out.rename(columns={time_col: "time"})
     return out[["time", "open", "high", "low", "close"]]
+
+
+def get_ratio_data(
+    base_ticker: str,
+    quote_ticker: str,
+    *,
+    base_kwargs: dict | None = None,
+    quote_kwargs: dict | None = None,
+) -> pd.DataFrame:
+    base = get_data(base_ticker, **(base_kwargs or {}))
+    quote = get_data(quote_ticker, **(quote_kwargs or {}))
+    return calculate_ratio_data(base, quote)

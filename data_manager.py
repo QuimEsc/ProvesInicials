@@ -3,6 +3,7 @@ import re
 import time
 import random
 import threading
+import urllib.request
 from typing import Dict, Tuple
 
 import pandas as pd
@@ -36,6 +37,43 @@ YF_BASE_BACKOFF_SECONDS = float(os.environ.get("YF_BASE_BACKOFF_SECONDS", "2.0")
 YF_RATE_LIMIT_BACKOFF_SECONDS = float(os.environ.get("YF_RATE_LIMIT_BACKOFF_SECONDS", "20.0"))
 YF_MIN_SECONDS_BETWEEN_REQUESTS = float(os.environ.get("YF_MIN_SECONDS_BETWEEN_REQUESTS", "1.2"))
 YF_RANDOM_JITTER_SECONDS = float(os.environ.get("YF_RANDOM_JITTER_SECONDS", "0.8"))
+FRED_TIMEOUT_SECONDS = float(os.environ.get("FRED_TIMEOUT_SECONDS", "12"))
+FRED_ECBDFR_URL = os.environ.get(
+    "FRED_ECBDFR_URL",
+    "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ECBDFR",
+)
+FRED_ECBDFR_TEXT_URL = os.environ.get(
+    "FRED_ECBDFR_TEXT_URL",
+    "https://fred.stlouisfed.org/data/ECBDFR",
+)
+FRED_SERIES_URLS = {
+    "DFEDTARU": os.environ.get(
+        "FRED_DFEDTARU_URL",
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU",
+    ),
+    "DFEDTARL": os.environ.get(
+        "FRED_DFEDTARL_URL",
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARL",
+    ),
+    "DFF": os.environ.get(
+        "FRED_DFF_URL",
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF",
+    ),
+    "FEDFUNDS": os.environ.get(
+        "FRED_FEDFUNDS_URL",
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS",
+    ),
+}
+FEDERAL_RESERVE_DFF_URL = os.environ.get(
+    "FEDERAL_RESERVE_DFF_URL",
+    "https://www.federalreserve.gov/datadownload/Output.aspx"
+    "?rel=H15&series=646250c87b1afd04cc6774796fc0cec8&lastObs=&from=&to="
+    "&filetype=csv&label=include&layout=seriescolumn",
+)
+ECB_DFR_URL = os.environ.get(
+    "ECB_DFR_URL",
+    "https://data-api.ecb.europa.eu/service/data/FM/D.U2.EUR.4F.KR.DFR.LEV?format=csvdata",
+)
 
 # Logs en consola
 ENABLE_LOGS = str(os.environ.get("ENABLE_DATA_MANAGER_LOGS", "1")).strip().lower() not in {"0", "false", "no", "off"}
@@ -65,6 +103,10 @@ def _safe_filename(ticker: str) -> str:
 
 def _csv_path(ticker: str) -> str:
     return os.path.join(CARPETA_DADES, f"{_safe_filename(ticker)}.csv")
+
+
+def _rate_csv_path(series_id: str) -> str:
+    return os.path.join(CARPETA_DADES, f"{_safe_filename(series_id)}.csv")
 
 
 def _utc_now_naive() -> pd.Timestamp:
@@ -103,7 +145,7 @@ def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
 
     out.index = pd.DatetimeIndex(idx)
     out = out[~out.index.isna()].copy()
-    out = out.sort_index()
+    out = out.sort_index(kind="mergesort")
 
     # En dades diàries volem una sola fila per data.
     # Si hi ha dos timestamps del mateix dia, ens quedem amb l'últim.
@@ -111,7 +153,7 @@ def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
     out = out[~out.index.duplicated(keep="last")].copy()
 
     out.index.name = "Date"
-    return out.sort_index()
+    return out.sort_index(kind="mergesort")
 
 
 def _ensure_ohlcv_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -405,7 +447,329 @@ def _save_local_csv(path: str, df: pd.DataFrame) -> None:
     os.replace(tmp_path, path)
 
 
-def get_data(ticker: str, force_refresh: bool = False) -> pd.DataFrame:
+def _empty_rate_series() -> pd.Series:
+    return pd.Series(dtype="float64", name="Rate", index=pd.DatetimeIndex([], name="Date"))
+
+
+def _read_rate_csv(path: str) -> pd.Series:
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return _empty_rate_series()
+
+    if df.empty:
+        return _empty_rate_series()
+
+    cols = {str(col).strip().lower(): col for col in df.columns}
+    date_col = cols.get("date") or df.columns[0]
+    rate_col = cols.get("rate")
+    if rate_col is None:
+        value_cols = [col for col in df.columns if col != date_col]
+        if not value_cols:
+            return _empty_rate_series()
+        rate_col = value_cols[0]
+
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df[date_col], errors="coerce"),
+            "Rate": pd.to_numeric(df[rate_col].replace(".", pd.NA), errors="coerce"),
+        }
+    ).dropna(subset=["Date"])
+    out = out.sort_values("Date")
+    out["Date"] = out["Date"].dt.normalize()
+    out = out.drop_duplicates(subset=["Date"], keep="last")
+    out = out.set_index("Date")
+    out.index.name = "Date"
+    return out["Rate"].astype(float)
+
+
+def _download_ecbdfr_from_fred() -> pd.Series:
+    _log("ECBDFR: descarregant dades de FRED")
+    try:
+        return _download_ecbdfr_csv()
+    except Exception as exc:
+        _log(f"ECBDFR: descàrrega CSV de FRED fallida ({exc}). Provant API ECB.")
+    try:
+        return _download_ecbdfr_ecb_api()
+    except Exception as exc:
+        _log(f"ECBDFR: descàrrega API ECB fallida ({exc}). Provant taula de text FRED.")
+        return _download_ecbdfr_text()
+
+
+def _download_ecbdfr_csv() -> pd.Series:
+    request = urllib.request.Request(
+        FRED_ECBDFR_URL,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; borsa-dashboard/1.0)"},
+    )
+    with urllib.request.urlopen(request, timeout=FRED_TIMEOUT_SECONDS) as response:
+        df = pd.read_csv(response)
+
+    if df.empty:
+        return _empty_rate_series()
+
+    value_col = "ECBDFR" if "ECBDFR" in df.columns else df.columns[-1]
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df["observation_date"], errors="coerce"),
+            "Rate": pd.to_numeric(df[value_col].replace(".", pd.NA), errors="coerce"),
+        }
+    ).dropna(subset=["Date"])
+    out = out.sort_values("Date")
+    out["Date"] = out["Date"].dt.normalize()
+    out = out.drop_duplicates(subset=["Date"], keep="last")
+    out = out.dropna(subset=["Rate"])
+    out = out.set_index("Date")
+    out.index.name = "Date"
+    return out["Rate"].astype(float)
+
+
+def _download_fred_rate_csv(series_id: str) -> pd.Series:
+    series_id = str(series_id).strip().upper()
+    url = FRED_SERIES_URLS.get(series_id)
+    if not url:
+        url = os.environ.get(
+            f"FRED_{series_id}_URL",
+            f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+        )
+
+    _log(f"{series_id}: descarregant dades de FRED")
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; borsa-dashboard/1.0)"},
+    )
+    with urllib.request.urlopen(request, timeout=FRED_TIMEOUT_SECONDS) as response:
+        df = pd.read_csv(response)
+
+    if df.empty:
+        return _empty_rate_series()
+
+    cols = {str(col).strip().lower(): col for col in df.columns}
+    date_col = cols.get("observation_date") or cols.get("date") or df.columns[0]
+    value_col = series_id if series_id in df.columns else df.columns[-1]
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df[date_col], errors="coerce"),
+            "Rate": pd.to_numeric(df[value_col].replace(".", pd.NA), errors="coerce"),
+        }
+    ).dropna(subset=["Date"])
+    out = out.sort_values("Date")
+    out["Date"] = out["Date"].dt.normalize()
+    out = out.drop_duplicates(subset=["Date"], keep="last")
+    out = out.dropna(subset=["Rate"])
+    out = out.set_index("Date")
+    out.index.name = "Date"
+    return out["Rate"].astype(float)
+
+
+def _download_federal_reserve_h15_dff() -> pd.Series:
+    _log("DFF: descarregant dades alternatives de Federal Reserve H.15")
+    request = urllib.request.Request(
+        FEDERAL_RESERVE_DFF_URL,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; borsa-dashboard/1.0)"},
+    )
+    with urllib.request.urlopen(request, timeout=FRED_TIMEOUT_SECONDS) as response:
+        df = pd.read_csv(response, skiprows=5)
+
+    if df.empty:
+        return _empty_rate_series()
+
+    date_col = df.columns[0]
+    value_col = df.columns[-1]
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df[date_col], errors="coerce"),
+            "Rate": pd.to_numeric(df[value_col].replace({"ND": pd.NA, ".": pd.NA}), errors="coerce"),
+        }
+    ).dropna(subset=["Date"])
+    out = out.sort_values("Date")
+    out["Date"] = out["Date"].dt.normalize()
+    out = out.drop_duplicates(subset=["Date"], keep="last")
+    out = out.dropna(subset=["Rate"])
+    out = out.set_index("Date")
+    out.index.name = "Date"
+    return out["Rate"].astype(float)
+
+
+def _download_ecbdfr_text() -> pd.Series:
+    request = urllib.request.Request(
+        FRED_ECBDFR_TEXT_URL,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; borsa-dashboard/1.0)"},
+    )
+    with urllib.request.urlopen(request, timeout=FRED_TIMEOUT_SECONDS) as response:
+        text = response.read().decode("utf-8", errors="replace")
+
+    rows = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        match = re.match(r"^(\d{4}-\d{2}-\d{2})\s+(-?\d+(?:\.\d+)?)$", line)
+        if match:
+            rows.append((match.group(1), float(match.group(2))))
+
+    if not rows:
+        return _empty_rate_series()
+
+    out = pd.DataFrame(rows, columns=["Date", "Rate"])
+    out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+    out = out.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last")
+    out = out.set_index("Date").sort_index()
+    out.index.name = "Date"
+    return out["Rate"].astype(float)
+
+
+def _download_ecbdfr_ecb_api() -> pd.Series:
+    request = urllib.request.Request(
+        ECB_DFR_URL,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; borsa-dashboard/1.0)"},
+    )
+    with urllib.request.urlopen(request, timeout=FRED_TIMEOUT_SECONDS) as response:
+        df = pd.read_csv(response)
+
+    if df.empty or "TIME_PERIOD" not in df.columns or "OBS_VALUE" not in df.columns:
+        return _empty_rate_series()
+
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df["TIME_PERIOD"], errors="coerce"),
+            "Rate": pd.to_numeric(df["OBS_VALUE"], errors="coerce"),
+        }
+    ).dropna(subset=["Date", "Rate"])
+    out = out.sort_values("Date")
+    out["Date"] = out["Date"].dt.normalize()
+    out = out.drop_duplicates(subset=["Date"], keep="last")
+    out = out.set_index("Date")
+    out.index.name = "Date"
+    return out["Rate"].astype(float)
+
+
+def _save_rate_csv(path: str, series: pd.Series) -> None:
+    out = series.dropna().copy()
+    out.index = pd.to_datetime(out.index).normalize()
+    out = out[~out.index.duplicated(keep="last")].sort_index()
+    df = out.rename("Rate").reset_index()
+    df.columns = ["Date", "Rate"]
+    tmp_path = f"{path}.tmp"
+    df.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, path)
+
+
+def _get_fred_rate_series(series_id: str, force_refresh: bool = False, *, allow_stale: bool = False) -> pd.Series:
+    series_id = str(series_id).strip().upper()
+    path = _rate_csv_path(series_id)
+    local = _read_rate_csv(path) if os.path.exists(path) else _empty_rate_series()
+    file_ts = _file_timestamp_utc(path)
+
+    needs_refresh = force_refresh or local.empty or ((not allow_stale) and not _is_timestamp_fresh(file_ts))
+    if needs_refresh:
+        try:
+            rate = _download_fred_rate_csv(series_id)
+            if rate.empty:
+                raise ValueError(f"FRED no ha tornat dades {series_id}.")
+            _save_rate_csv(path, rate)
+            return rate.copy()
+        except Exception as exc:
+            if series_id == "DFF":
+                try:
+                    rate = _download_federal_reserve_h15_dff()
+                    if rate.empty:
+                        raise ValueError("Federal Reserve H.15 no ha tornat dades DFF.")
+                    _save_rate_csv(path, rate)
+                    return rate.copy()
+                except Exception as fed_exc:
+                    _log(f"DFF: fallback Federal Reserve H.15 fallit ({fed_exc}).")
+            if not local.empty:
+                _log(f"{series_id}: error refrescant FRED ({exc}). Es manté el CSV local.")
+                return local.copy()
+            raise
+
+    if allow_stale and not _is_timestamp_fresh(file_ts):
+        _log(f"{series_id}: usant CSV local fora de finestra de refresc")
+    else:
+        _log(f"{series_id}: usant CSV local recent sense refrescar")
+    return local.copy()
+
+
+def _try_get_fred_rate_series(series_id: str, force_refresh: bool = False, *, allow_stale: bool = False) -> pd.Series:
+    try:
+        return _get_fred_rate_series(series_id, force_refresh=force_refresh, allow_stale=allow_stale)
+    except Exception as exc:
+        _log(f"{series_id}: no disponible ({exc})")
+        return _empty_rate_series()
+
+
+def _combine_fed_rate_series(
+    upper: pd.Series,
+    lower: pd.Series,
+    dff: pd.Series,
+    fedfunds: pd.Series,
+) -> pd.Series:
+    target = pd.DataFrame({"upper": upper, "lower": lower}).dropna()
+    target_mid = ((target["upper"] + target["lower"]) / 2.0).rename("target")
+
+    series_by_name = {
+        "target": target_mid,
+        "dff": dff.rename("dff"),
+        "fedfunds": fedfunds.rename("fedfunds"),
+    }
+    index = pd.DatetimeIndex([], name="Date")
+    for series in series_by_name.values():
+        if not series.empty:
+            index = index.union(pd.DatetimeIndex(series.index))
+
+    if index.empty:
+        return _empty_rate_series()
+
+    index = pd.DatetimeIndex(index).sort_values()
+    data = pd.DataFrame(index=index)
+    for name, series in series_by_name.items():
+        data[name] = series.reindex(index).ffill()
+
+    combined = data["target"].combine_first(data["dff"]).combine_first(data["fedfunds"]).dropna()
+    combined.name = "Rate"
+    combined.index.name = "Date"
+    return combined.astype(float)
+
+
+def get_ecb_deposit_rate(force_refresh: bool = False, *, allow_stale: bool = False) -> pd.Series:
+    path = _rate_csv_path("ECBDFR")
+    local = _read_rate_csv(path) if os.path.exists(path) else _empty_rate_series()
+    file_ts = _file_timestamp_utc(path)
+
+    needs_refresh = force_refresh or local.empty or ((not allow_stale) and not _is_timestamp_fresh(file_ts))
+    if needs_refresh:
+        try:
+            rate = _download_ecbdfr_from_fred()
+            if rate.empty:
+                raise ValueError("FRED no ha tornat dades ECBDFR.")
+            _save_rate_csv(path, rate)
+            return rate.copy()
+        except Exception as exc:
+            if not local.empty:
+                _log(f"ECBDFR: error refrescant FRED ({exc}). Es manté el CSV local.")
+                return local.copy()
+            raise
+
+    if allow_stale and not _is_timestamp_fresh(file_ts):
+        _log("ECBDFR: usant CSV local fora de finestra de refresc")
+    else:
+        _log("ECBDFR: usant CSV local recent sense refrescar")
+    return local.copy()
+
+
+def get_fed_rate(force_refresh: bool = False, *, allow_stale: bool = False) -> pd.Series:
+    upper = _try_get_fred_rate_series("DFEDTARU", force_refresh=force_refresh, allow_stale=allow_stale)
+    lower = _try_get_fred_rate_series("DFEDTARL", force_refresh=force_refresh, allow_stale=allow_stale)
+    dff = _try_get_fred_rate_series("DFF", force_refresh=force_refresh, allow_stale=allow_stale)
+    fedfunds = _try_get_fred_rate_series("FEDFUNDS", force_refresh=force_refresh, allow_stale=allow_stale)
+
+    fed_rate = _combine_fed_rate_series(upper, lower, dff, fedfunds)
+    if fed_rate.empty:
+        raise ValueError("No s'han pogut obtindre dades FED de FRED.")
+
+    _save_rate_csv(_rate_csv_path("FED_RATE"), fed_rate)
+    return fed_rate.copy()
+
+
+def get_data(ticker: str, force_refresh: bool = False, *, allow_stale: bool = False) -> pd.DataFrame:
     ticker = _normalize_ticker(ticker)
     now = _utc_now_naive()
 
@@ -424,7 +788,7 @@ def get_data(ticker: str, force_refresh: bool = False) -> pd.DataFrame:
         df_local = _read_local_csv(path)
         file_ts = _file_timestamp_utc(path)
 
-        if force_refresh or df_local.empty or not _is_timestamp_fresh(file_ts):
+        if force_refresh or df_local.empty or ((not allow_stale) and not _is_timestamp_fresh(file_ts)):
             if force_refresh:
                 _log(f"{ticker}: force_refresh=True, refrescant dades")
             elif df_local.empty:
@@ -445,7 +809,10 @@ def get_data(ticker: str, force_refresh: bool = False) -> pd.DataFrame:
                 else:
                     raise
         else:
-            _log(f"{ticker}: usant CSV local recent sense refrescar")
+            if allow_stale and not _is_timestamp_fresh(file_ts):
+                _log(f"{ticker}: usant CSV local fora de finestra de refresc")
+            else:
+                _log(f"{ticker}: usant CSV local recent sense refrescar")
             df = df_local
     else:
         _log(f"{ticker}: no existeix CSV local, fent descàrrega inicial")

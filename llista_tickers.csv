@@ -1,23 +1,23 @@
-Nom,Ticker
-S&P_500,^GSPC
-SP500IQUAL,^spxew
-Nasdaq,^NDX
-Nasdaq_TR_Divisa,NQSE.DE
-MSCI_Word,"^990100-USD-STRD"
-MSCI_ACW,ACWI
-Bitcoin,"BTC-USD"
-Or,GC=F
-Etf_Or,PPFB.DE
-Russel2000,^RUT
-TradeRepu_Russel,XRS2.DE
-Brent,BZ=F
-Euro Stoxx 50,^STOXX50E
-HANG SENG,^HSI
-Kospi,^KS11
-TradeRepuKOREA,FLXK.L
-Nifty 50,^NSEI
-MSCI_India,INDA
-TradeRepuINDIA,QDV5.DE
-Microsoft,MSFT
-VIX,^VIX
-Exxon Petroli,XOM
+Nom,Ticker,RefreshGroup
+S&P_500,^GSPC,market
+SP500IQUAL,^spxew,market
+Nasdaq,^NDX,market
+Nasdaq_TR_Divisa,NQSE.DE,market
+MSCI_Word,"^990100-USD-STRD",market
+MSCI_ACW,ACWI,market
+Bitcoin,"BTC-USD",24h
+Or,GC=F,24h
+Etf_Or,PPFB.DE,market
+Russel2000,^RUT,market
+TradeRepu_Russel,XRS2.DE,market
+Brent,BZ=F,24h
+Euro Stoxx 50,^STOXX50E,market
+HANG SENG,^HSI,market
+Kospi,^KS11,market
+TradeRepuKOREA,FLXK.L,market
+Nifty 50,^NSEI,market
+MSCI_India,INDA,market
+TradeRepuINDIA,QDV5.DE,market
+Microsoft,MSFT,market
+VIX,^VIX,market
+Exxon Petroli,XOM,market

@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from data_manager import REFRESH_INTERVAL_MINUTES, get_data
+from data_manager import REFRESH_INTERVAL_MINUTES, get_data, get_ecb_deposit_rate, get_fed_rate
 import logic_blue
 import logic_lines
 import logic_ratio
 import logic_red
+import portfolio_rebalance
 
 ARXIU_TICKERS = "llista_tickers.csv"
 DENOMINADOR = "^VIX"
@@ -21,6 +22,12 @@ RANG_C = 850
 RANG_V = 850
 WEEKLY_RULE = "W-FRI"
 TIMEFRAME_OPTIONS = ["D", "W"]
+REFRESH_TIMEZONE = "Europe/Madrid"
+MARKET_REFRESH_START_HOUR = 7
+MARKET_REFRESH_END_HOUR = 23
+REFRESH_GROUP_MARKET = "market"
+REFRESH_GROUP_24H = "24h"
+REFRESH_GROUP_DEFAULT = REFRESH_GROUP_MARKET
 
 COLOR_LINIES_COMPRA = {
     "c1": "#93c5fd",
@@ -48,7 +55,38 @@ def _assegurar_llista_tickers(base_dir: Path) -> pd.DataFrame:
     df = df[(df["Nom"] != "") & (df["Ticker"] != "")]
     if df.empty:
         raise ValueError("llista_tickers.csv no conté tickers vàlids.")
+    if "RefreshGroup" not in df.columns:
+        df["RefreshGroup"] = REFRESH_GROUP_DEFAULT
+    df["RefreshGroup"] = df["RefreshGroup"].apply(_normalize_refresh_group)
     return df
+
+
+def _normalize_refresh_group(value: str | None) -> str:
+    group = str(value or "").strip().lower()
+    aliases = {
+        "": REFRESH_GROUP_DEFAULT,
+        "default": REFRESH_GROUP_DEFAULT,
+        "mercat": REFRESH_GROUP_MARKET,
+        "market_hours": REFRESH_GROUP_MARKET,
+        "trading": REFRESH_GROUP_MARKET,
+        "always": REFRESH_GROUP_24H,
+        "24/7": REFRESH_GROUP_24H,
+        "24h": REFRESH_GROUP_24H,
+    }
+    return aliases.get(group, group if group in {REFRESH_GROUP_MARKET, REFRESH_GROUP_24H} else REFRESH_GROUP_DEFAULT)
+
+
+def _local_refresh_time(now_utc_naive: pd.Timestamp) -> pd.Timestamp:
+    return now_utc_naive.tz_localize("UTC").tz_convert(REFRESH_TIMEZONE)
+
+
+def _is_refresh_allowed(refresh_group: str, now_local: pd.Timestamp) -> bool:
+    group = _normalize_refresh_group(refresh_group)
+    if group == REFRESH_GROUP_24H:
+        return True
+    if now_local.weekday() >= 5:
+        return False
+    return MARKET_REFRESH_START_HOUR <= int(now_local.hour) < MARKET_REFRESH_END_HOUR
 
 
 def _slugify(value: str) -> str:
@@ -268,16 +306,31 @@ def _clean_for_json(value):
 
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(_clean_for_json(payload), ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    text = json.dumps(_clean_for_json(payload), ensure_ascii=False, separators=(",", ":"))
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_text_if_changed(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return
+    path.write_text(text, encoding="utf-8")
 
 
 def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) -> None:
     df_tickers = _assegurar_llista_tickers(base_dir)
     now = pd.Timestamp.utcnow().tz_localize(None)
     generated_at = now.isoformat(timespec="seconds") + "Z"
+    now_local = _local_refresh_time(now)
+    refresh_groups_by_ticker = {
+        str(row["Ticker"]).strip().upper(): _normalize_refresh_group(row.get("RefreshGroup"))
+        for row in df_tickers.to_dict(orient="records")
+    }
+    denominator_refresh_group = refresh_groups_by_ticker.get(DENOMINADOR.upper(), REFRESH_GROUP_DEFAULT)
+    denominator_refresh_allowed = _is_refresh_allowed(denominator_refresh_group, now_local)
+    df_denominator_daily = None
 
     output_dir.mkdir(parents=True, exist_ok=True)
     tickers_dir = output_dir / "tickers"
@@ -285,15 +338,27 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
 
     ticker_items: list[dict] = []
     summary_rows: list[dict] = []
+    generated_ticker_files: set[str] = set()
+    price_data_by_ticker: dict[str, pd.DataFrame] = {}
 
-    for row in df_tickers.itertuples(index=False):
-        nom = str(row.Nom).strip()
-        ticker = str(row.Ticker).strip()
+    for row in df_tickers.to_dict(orient="records"):
+        nom = str(row["Nom"]).strip()
+        ticker = str(row["Ticker"]).strip()
+        refresh_group = _normalize_refresh_group(row.get("RefreshGroup"))
+        refresh_allowed = _is_refresh_allowed(refresh_group, now_local)
         slug = _slugify(nom)
+        data_kwargs = {
+            "force_refresh": force_refresh and refresh_allowed,
+            "allow_stale": not refresh_allowed,
+        }
 
-        print(f"Generant {nom} ({ticker})...")
+        print(
+            f"Generant {nom} ({ticker})... "
+            f"refresh_group={refresh_group}, refresh_allowed={refresh_allowed}"
+        )
 
-        df_main_daily = get_data(ticker, force_refresh=force_refresh)
+        df_main_daily = get_data(ticker, **data_kwargs)
+        price_data_by_ticker[ticker.upper()] = df_main_daily
         df_main_weekly = _resample_ohlc(df_main_daily, WEEKLY_RULE)
 
         candles_daily = _format_candles(df_main_daily)
@@ -305,7 +370,13 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
 
         if ticker != DENOMINADOR:
             try:
-                ratio_daily_raw = logic_ratio.get_ratio_data(ticker, DENOMINADOR)
+                if df_denominator_daily is None:
+                    df_denominator_daily = get_data(
+                        DENOMINADOR,
+                        force_refresh=force_refresh and denominator_refresh_allowed,
+                        allow_stale=not denominator_refresh_allowed,
+                    )
+                ratio_daily_raw = logic_ratio.calculate_ratio_data(df_main_daily, df_denominator_daily)
                 ratio_daily_indexed = _to_indexed_ohlc(ratio_daily_raw)
                 ratio_weekly_indexed = _resample_ohlc(ratio_daily_indexed, WEEKLY_RULE)
                 ratio_daily = _format_candles(ratio_daily_indexed)
@@ -337,7 +408,7 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
                 "ticker": ticker,
                 "slug": slug,
                 "denominator": DENOMINADOR,
-                "generated_at": generated_at,
+                "refresh_group": refresh_group,
                 "refresh_interval_minutes": REFRESH_INTERVAL_MINUTES,
             },
             "daily": {
@@ -370,13 +441,16 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
             },
         }
 
-        _write_json(tickers_dir / f"{slug}.json", ticker_payload)
+        ticker_filename = f"{slug}.json"
+        generated_ticker_files.add(ticker_filename)
+        _write_json(tickers_dir / ticker_filename, ticker_payload)
 
         ticker_items.append(
             {
                 "name": nom,
                 "ticker": ticker,
                 "slug": slug,
+                "refresh_group": refresh_group,
                 "summary": {
                     "close": close,
                     "line": nom_linia,
@@ -408,6 +482,13 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
         "generated_at": generated_at,
         "denominator": DENOMINADOR,
         "refresh_interval_minutes": REFRESH_INTERVAL_MINUTES,
+        "refresh_schedule": {
+            "timezone": REFRESH_TIMEZONE,
+            "market_days": "monday-friday",
+            "market_start_hour": MARKET_REFRESH_START_HOUR,
+            "market_end_hour": MARKET_REFRESH_END_HOUR,
+            "always_group": REFRESH_GROUP_24H,
+        },
         "timeframes": TIMEFRAME_OPTIONS,
         "line_colors": {
             "buy": COLOR_LINIES_COMPRA,
@@ -420,8 +501,23 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
         "rows": summary_rows,
     }
 
+    ecb_rate = get_ecb_deposit_rate(force_refresh=force_refresh)
+    fed_rate = get_fed_rate(force_refresh=force_refresh)
+    rebalance_payload, rebalance_history = portfolio_rebalance.build_rebalance_data(
+        price_data_by_ticker[portfolio_rebalance.MSCI_WORLD_TICKER.upper()],
+        price_data_by_ticker[portfolio_rebalance.NASDAQ_TICKER.upper()],
+        ecb_rate,
+        fed_rate,
+        generated_at=generated_at,
+    )
+    _write_json(output_dir / "rebalance.json", rebalance_payload)
+    _write_text_if_changed(output_dir / "rebalance_history.csv", rebalance_history.to_csv(index=False))
+
     _write_json(output_dir / "manifest.json", manifest)
     _write_json(output_dir / "summary.json", summary)
+    for stale_path in tickers_dir.glob("*.json"):
+        if stale_path.name not in generated_ticker_files:
+            stale_path.unlink()
     print(f"OK. Dades generades en {output_dir}")
 
 
