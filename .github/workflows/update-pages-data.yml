@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "7,37 * * * *"
+    - cron: "12 3 * * *"
   push:
     branches:
       - main
@@ -14,6 +15,7 @@ on:
       - logic_lines.py
       - logic_ratio.py
       - logic_red.py
+      - portfolio_rebalance.py
       - llista_tickers.csv
       - requirements.txt
       - .github/workflows/update-pages-data.yml
@@ -24,7 +26,7 @@ permissions:
 
 concurrency:
   group: update-dashboard-data
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-data:
@@ -37,6 +39,7 @@ jobs:
       YF_BASE_BACKOFF_SECONDS: "1.5"
       YF_RATE_LIMIT_BACKOFF_SECONDS: "8"
       YF_RANDOM_JITTER_SECONDS: "0.3"
+      FRED_TIMEOUT_SECONDS: "6"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -57,7 +60,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build static JSON data
-        run: python build_pages_data.py --base-dir . --output-dir docs/data --force-refresh
+        run: |
+          RATE_ARGS=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "12 3 * * *" ]; then
+            RATE_ARGS="--refresh-rates"
+          fi
+          python build_pages_data.py --base-dir . --output-dir docs/data --force-refresh $RATE_ARGS
 
       - name: Commit generated files and updated CSV history
         run: |
