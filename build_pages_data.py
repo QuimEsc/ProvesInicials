@@ -319,7 +319,7 @@ def _write_text_if_changed(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) -> None:
+def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *, refresh_rates: bool = False) -> None:
     df_tickers = _assegurar_llista_tickers(base_dir)
     now = pd.Timestamp.utcnow().tz_localize(None)
     generated_at = now.isoformat(timespec="seconds") + "Z"
@@ -501,23 +501,30 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False) ->
         "rows": summary_rows,
     }
 
-    ecb_rate = get_ecb_deposit_rate(force_refresh=force_refresh)
-    fed_rate = get_fed_rate(force_refresh=force_refresh)
-    rebalance_payload, rebalance_history = portfolio_rebalance.build_rebalance_data(
-        price_data_by_ticker[portfolio_rebalance.MSCI_WORLD_TICKER.upper()],
-        price_data_by_ticker[portfolio_rebalance.NASDAQ_TICKER.upper()],
-        ecb_rate,
-        fed_rate,
-        generated_at=generated_at,
-    )
-    _write_json(output_dir / "rebalance.json", rebalance_payload)
-    _write_text_if_changed(output_dir / "rebalance_history.csv", rebalance_history.to_csv(index=False))
-
     _write_json(output_dir / "manifest.json", manifest)
     _write_json(output_dir / "summary.json", summary)
     for stale_path in tickers_dir.glob("*.json"):
         if stale_path.name not in generated_ticker_files:
             stale_path.unlink()
+
+    try:
+        print(f"Generant estratègia de cartera... refresh_rates={refresh_rates}")
+        ecb_rate = get_ecb_deposit_rate(force_refresh=refresh_rates, allow_stale=not refresh_rates)
+        fed_rate = get_fed_rate(force_refresh=refresh_rates, allow_stale=not refresh_rates)
+        rebalance_payload, rebalance_history = portfolio_rebalance.build_rebalance_data(
+            price_data_by_ticker[portfolio_rebalance.MSCI_WORLD_TICKER.upper()],
+            price_data_by_ticker[portfolio_rebalance.NASDAQ_TICKER.upper()],
+            ecb_rate,
+            fed_rate,
+            generated_at=generated_at,
+        )
+        _write_json(output_dir / "rebalance.json", rebalance_payload)
+        _write_text_if_changed(output_dir / "rebalance_history.csv", rebalance_history.to_csv(index=False))
+    except Exception as exc:
+        print(
+            "AVÍS: no s'ha pogut actualitzar l'estratègia de cartera. "
+            f"Es conserven els últims fitxers de rebalanç. Motiu: {exc}"
+        )
     print(f"OK. Dades generades en {output_dir}")
 
 
@@ -526,10 +533,12 @@ if __name__ == "__main__":
     parser.add_argument("--base-dir", default=".", help="Carpeta arrel del projecte")
     parser.add_argument("--output-dir", default="docs/data", help="Carpeta d'eixida dels JSON")
     parser.add_argument("--force-refresh", action="store_true", help="Força el refresc de dades")
+    parser.add_argument("--refresh-rates", action="store_true", help="Refresca també les sèries BCE/FED")
     args = parser.parse_args()
 
     build_site(
         base_dir=Path(args.base_dir).resolve(),
         output_dir=Path(args.base_dir).resolve() / args.output_dir,
         force_refresh=args.force_refresh,
+        refresh_rates=args.refresh_rates,
     )

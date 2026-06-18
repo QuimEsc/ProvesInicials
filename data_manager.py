@@ -756,6 +756,17 @@ def get_ecb_deposit_rate(force_refresh: bool = False, *, allow_stale: bool = Fal
 
 
 def get_fed_rate(force_refresh: bool = False, *, allow_stale: bool = False) -> pd.Series:
+    combined_path = _rate_csv_path("FED_RATE")
+    combined_local = _read_rate_csv(combined_path) if os.path.exists(combined_path) else _empty_rate_series()
+    combined_ts = _file_timestamp_utc(combined_path)
+
+    if (not force_refresh) and allow_stale and not combined_local.empty:
+        if not _is_timestamp_fresh(combined_ts):
+            _log("FED_RATE: usant CSV local fora de finestra de refresc")
+        else:
+            _log("FED_RATE: usant CSV local recent sense refrescar")
+        return combined_local.copy()
+
     upper = _try_get_fred_rate_series("DFEDTARU", force_refresh=force_refresh, allow_stale=allow_stale)
     lower = _try_get_fred_rate_series("DFEDTARL", force_refresh=force_refresh, allow_stale=allow_stale)
     dff = _try_get_fred_rate_series("DFF", force_refresh=force_refresh, allow_stale=allow_stale)
