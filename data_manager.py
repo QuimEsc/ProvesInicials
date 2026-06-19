@@ -696,6 +696,32 @@ def _try_get_fred_rate_series(series_id: str, force_refresh: bool = False, *, al
         return _empty_rate_series()
 
 
+def _get_federal_reserve_dff_series(force_refresh: bool = False, *, allow_stale: bool = False) -> pd.Series:
+    path = _rate_csv_path("DFF")
+    local = _read_rate_csv(path) if os.path.exists(path) else _empty_rate_series()
+    file_ts = _file_timestamp_utc(path)
+
+    needs_refresh = force_refresh or local.empty or ((not allow_stale) and not _is_timestamp_fresh(file_ts))
+    if needs_refresh:
+        try:
+            rate = _download_federal_reserve_h15_dff()
+            if rate.empty:
+                raise ValueError("Federal Reserve H.15 no ha tornat dades DFF.")
+            _save_rate_csv(path, rate)
+            return rate.copy()
+        except Exception as exc:
+            if not local.empty:
+                _log(f"DFF: error refrescant Federal Reserve H.15 ({exc}). Es manté el CSV local.")
+                return local.copy()
+            raise
+
+    if allow_stale and not _is_timestamp_fresh(file_ts):
+        _log("DFF: usant CSV local fora de finestra de refresc")
+    else:
+        _log("DFF: usant CSV local recent sense refrescar")
+    return local.copy()
+
+
 def _combine_fed_rate_series(
     upper: pd.Series,
     lower: pd.Series,
@@ -767,12 +793,23 @@ def get_fed_rate(force_refresh: bool = False, *, allow_stale: bool = False) -> p
             _log("FED_RATE: usant CSV local recent sense refrescar")
         return combined_local.copy()
 
-    upper = _try_get_fred_rate_series("DFEDTARU", force_refresh=force_refresh, allow_stale=allow_stale)
-    lower = _try_get_fred_rate_series("DFEDTARL", force_refresh=force_refresh, allow_stale=allow_stale)
-    dff = _try_get_fred_rate_series("DFF", force_refresh=force_refresh, allow_stale=allow_stale)
-    fedfunds = _try_get_fred_rate_series("FEDFUNDS", force_refresh=force_refresh, allow_stale=allow_stale)
+    dff = _get_federal_reserve_dff_series(force_refresh=force_refresh, allow_stale=allow_stale)
+    upper = _empty_rate_series()
+    lower = _empty_rate_series()
+    fedfunds = _empty_rate_series()
 
-    fed_rate = _combine_fed_rate_series(upper, lower, dff, fedfunds)
+    if dff.empty:
+        upper = _try_get_fred_rate_series("DFEDTARU", force_refresh=force_refresh, allow_stale=allow_stale)
+        lower = _try_get_fred_rate_series("DFEDTARL", force_refresh=force_refresh, allow_stale=allow_stale)
+        dff = _try_get_fred_rate_series("DFF", force_refresh=force_refresh, allow_stale=allow_stale)
+        fedfunds = _try_get_fred_rate_series("FEDFUNDS", force_refresh=force_refresh, allow_stale=allow_stale)
+
+    fed_rate = dff.copy() if not dff.empty and upper.empty and lower.empty and fedfunds.empty else _combine_fed_rate_series(
+        upper,
+        lower,
+        dff,
+        fedfunds,
+    )
     if fed_rate.empty:
         raise ValueError("No s'han pogut obtindre dades FED de FRED.")
 
