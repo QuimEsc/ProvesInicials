@@ -12,6 +12,7 @@
     metricClose: document.getElementById('metricClose'),
     metricBuyLine: document.getElementById('metricBuyLine'),
     metricPct: document.getElementById('metricPct'),
+    strategySelect: document.getElementById('strategySelect'),
     officialMemorySelect: document.getElementById('officialMemorySelect'),
     rebalanceUpdatedBadge: document.getElementById('rebalanceUpdatedBadge'),
     rebalanceTableBody: document.getElementById('rebalanceTableBody'),
@@ -33,6 +34,7 @@
     manifest: null,
     summary: null,
     rebalance: null,
+    rebalanceStrategy: localStorage.getItem('dashboard-rebalance-strategy') || 'secondpass_391_airbag_s3',
     officialMemory: localStorage.getItem('dashboard-official-memory') || 'friday',
     tickerData: null,
     vixData: null,
@@ -187,6 +189,11 @@
     dom.officialMemorySelect.addEventListener('change', (event) => {
       state.officialMemory = event.target.value || 'friday';
       localStorage.setItem('dashboard-official-memory', state.officialMemory);
+      renderRebalanceTable();
+    });
+    dom.strategySelect.addEventListener('change', (event) => {
+      state.rebalanceStrategy = event.target.value || 'secondpass_391_airbag_s3';
+      localStorage.setItem('dashboard-rebalance-strategy', state.rebalanceStrategy);
       renderRebalanceTable();
     });
   }
@@ -423,6 +430,27 @@
   }
 
   function renderRebalanceTable() {
+    const strategyOptions = state.rebalance?.strategy_options || [];
+    const strategiesByKey = state.rebalance?.rows_by_strategy || {};
+    const validStrategyValues = strategyOptions.map((item) => item.value);
+    const defaultStrategy = state.rebalance?.meta?.default_strategy || 'secondpass_391_airbag_s3';
+    if (!validStrategyValues.includes(state.rebalanceStrategy) || !strategiesByKey[state.rebalanceStrategy]) {
+      state.rebalanceStrategy = strategiesByKey[defaultStrategy] ? defaultStrategy : (validStrategyValues[0] || defaultStrategy);
+    }
+    if (dom.strategySelect) {
+      if (strategyOptions.length) {
+        dom.strategySelect.innerHTML = '';
+        strategyOptions.forEach((item) => {
+          const option = document.createElement('option');
+          option.value = item.value;
+          option.textContent = item.label;
+          dom.strategySelect.appendChild(option);
+        });
+      }
+      dom.strategySelect.value = state.rebalanceStrategy;
+    }
+
+    const strategyData = strategiesByKey[state.rebalanceStrategy] || state.rebalance || {};
     const options = state.rebalance?.official_review_options || [];
     const validValues = options.map((item) => item.value);
     if (!validValues.includes(state.officialMemory)) {
@@ -430,16 +458,18 @@
     }
     dom.officialMemorySelect.value = state.officialMemory;
 
-    const rowsByOfficial = state.rebalance?.rows_by_official_review || {};
-    const rows = rowsByOfficial[state.officialMemory] || state.rebalance?.rows || [];
+    const rowsByOfficial = strategyData?.rows_by_official_review || state.rebalance?.rows_by_official_review || {};
+    const rows = rowsByOfficial[state.officialMemory] || strategyData?.rows || state.rebalance?.rows || [];
     dom.rebalanceTableBody.innerHTML = '';
     dom.rebalanceEmpty.hidden = rows.length > 0;
 
     const updatedAt = state.rebalance?.meta?.generated_at || state.manifest?.generated_at;
+    const selectedStrategy = strategyOptions.find((item) => item.value === state.rebalanceStrategy);
+    const strategyLabel = selectedStrategy?.label || strategyData?.label || state.rebalance?.meta?.default_strategy_label || 'Estratègia';
     const selectedOption = options.find((item) => item.value === state.officialMemory);
     const memoryLabel = selectedOption?.label || (state.officialMemory === 'thursday' ? 'Dijous' : 'Divendres');
     const updatedText = updatedAt ? `Actualitzat: ${formatDateTime(updatedAt)}` : '-';
-    dom.rebalanceUpdatedBadge.textContent = `${updatedText} · memòria ${memoryLabel.toLowerCase()}`;
+    dom.rebalanceUpdatedBadge.textContent = `${updatedText} · ${strategyLabel} · memòria ${memoryLabel.toLowerCase()}`;
 
     rows.forEach((row) => {
       if (!row?.available) return;

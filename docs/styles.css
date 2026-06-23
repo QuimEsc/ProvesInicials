@@ -187,6 +187,10 @@ body {
   min-width: 170px;
 }
 
+.strategy-control {
+  min-width: 190px;
+}
+
 .compact-control select {
   min-height: 34px;
   padding: 7px 10px;
