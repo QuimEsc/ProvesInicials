@@ -14,6 +14,11 @@
     metricPct: document.getElementById('metricPct'),
     strategySelect: document.getElementById('strategySelect'),
     officialMemorySelect: document.getElementById('officialMemorySelect'),
+    macroPanel: document.getElementById('macroPanel'),
+    macroStatusBadge: document.getElementById('macroStatusBadge'),
+    macroUpdatedBadge: document.getElementById('macroUpdatedBadge'),
+    macroSummaryText: document.getElementById('macroSummaryText'),
+    macroCards: document.getElementById('macroCards'),
     rebalanceUpdatedBadge: document.getElementById('rebalanceUpdatedBadge'),
     rebalanceTableBody: document.getElementById('rebalanceTableBody'),
     rebalanceEmpty: document.getElementById('rebalanceEmpty'),
@@ -34,6 +39,7 @@
     manifest: null,
     summary: null,
     rebalance: null,
+    macro: null,
     rebalanceStrategy: localStorage.getItem('dashboard-rebalance-strategy') || 'secondpass_391_airbag_s3',
     officialMemory: localStorage.getItem('dashboard-official-memory') || 'friday',
     tickerData: null,
@@ -201,16 +207,19 @@
   async function loadInitialData() {
     try {
       setStatus('Carregant manifest i resum...');
-      const [manifest, summary, rebalance] = await Promise.all([
+      const [manifest, summary, rebalance, macro] = await Promise.all([
         fetchJson('./data/manifest.json'),
         fetchJson('./data/summary.json'),
         fetchOptionalJson('./data/rebalance.json'),
+        fetchOptionalJson('./data/macro.json'),
       ]);
       state.manifest = manifest;
       state.summary = summary;
       state.rebalance = rebalance;
+      state.macro = macro;
       populateTickerSelect();
       renderSummaryTable();
+      renderMacroPanel();
       renderRebalanceTable();
       await loadVixData();
 
@@ -351,6 +360,66 @@
       });
       dom.summaryTableBody.appendChild(tr);
     });
+  }
+
+  function renderMacroPanel() {
+    const macro = state.macro;
+    if (!dom.macroPanel) return;
+    dom.macroPanel.hidden = !macro;
+    if (!macro) return;
+
+    const status = macro.status || {};
+    const tone = status.tone || 'neutral';
+    dom.macroStatusBadge.className = `macro-status-badge tone-${tone}`;
+    dom.macroStatusBadge.textContent = status.label || '-';
+    dom.macroSummaryText.textContent = status.summary || '-';
+
+    const updatedAt = macro.meta?.generated_at || state.manifest?.generated_at;
+    dom.macroUpdatedBadge.textContent = updatedAt ? `Actualitzat: ${formatDateTime(updatedAt)}` : '-';
+
+    dom.macroCards.innerHTML = '';
+    (macro.items || []).forEach((item) => {
+      dom.macroCards.appendChild(renderMacroCard(item));
+    });
+
+    const activeCell = macro.matrix?.active_cell || status.key;
+    document.querySelectorAll('.matrix-cell').forEach((cell) => {
+      cell.classList.remove('is-active', 'tone-good', 'tone-warning', 'tone-danger');
+      cell.removeAttribute('aria-current');
+      cell.querySelector('.matrix-current-tag')?.remove();
+      if (cell.dataset.cell === activeCell) {
+        cell.classList.add('is-active', `tone-${tone}`);
+        cell.setAttribute('aria-current', 'true');
+        const tag = document.createElement('em');
+        tag.className = 'matrix-current-tag';
+        tag.textContent = 'Situació actual';
+        cell.appendChild(tag);
+      }
+    });
+  }
+
+  function renderMacroCard(item) {
+    const card = document.createElement('article');
+    const stateKey = item.state || 'unknown';
+    card.className = `macro-card state-${stateKey}`;
+
+    const changeValue = item.kind === 'dxy' ? item.change_26w_pct : item.change_26w_pp;
+    const changeText = item.kind === 'dxy' ? formatSignedPct(changeValue) : formatSignedPp(changeValue);
+    const valueText = item.kind === 'dxy' ? formatNumber(item.value) : `${formatNumber(item.value)}%`;
+    const meter = Number.isFinite(Number(item.meter)) ? clamp(Number(item.meter), 0, 100) : 0;
+
+    card.innerHTML = `
+      <div class="macro-card-top">
+        <span class="macro-card-label">${escapeHtml(item.label || '-')}</span>
+        <span class="macro-pill">${escapeHtml(item.state_label || '-')}</span>
+      </div>
+      <div class="macro-card-value">${valueText}</div>
+      <div class="macro-card-change ${Number(changeValue) > 0 ? 'negative' : 'positive'}">${changeText} / 26s</div>
+      <div class="macro-meter" aria-hidden="true">
+        <div class="macro-meter-fill" style="width: ${meter}%"></div>
+      </div>
+    `;
+    return card;
   }
 
   function queueZoneRedraw() {
@@ -627,6 +696,30 @@
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(Number(value))}%`;
+  }
+
+  function formatSignedPct(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '-';
+    }
+    const number = Number(value);
+    const sign = number > 0 ? '+' : '';
+    return `${sign}${new Intl.NumberFormat('ca-ES', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(number)}%`;
+  }
+
+  function formatSignedPp(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '-';
+    }
+    const number = Number(value);
+    const sign = number > 0 ? '+' : '';
+    return `${sign}${new Intl.NumberFormat('ca-ES', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(number)} pp`;
   }
 
   function formatScore(value) {

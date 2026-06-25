@@ -150,6 +150,254 @@ body {
   margin-bottom: 16px;
 }
 
+.macro-panel {
+  margin-bottom: 16px;
+}
+
+.macro-header {
+  align-items: flex-start;
+}
+
+.macro-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.macro-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.tone-good {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.16);
+  color: #bbf7d0;
+}
+
+.tone-warning {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.16);
+  color: #fde68a;
+}
+
+.tone-danger {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.17);
+  color: #fecaca;
+}
+
+.macro-body {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+}
+
+.macro-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.macro-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.85);
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.macro-card.state-calm {
+  border-left-color: var(--green);
+}
+
+.macro-card.state-watch {
+  border-left-color: #f59e0b;
+}
+
+.macro-card.state-hostile {
+  border-left-color: var(--red);
+}
+
+.macro-card.state-unknown {
+  border-left-color: var(--muted);
+}
+
+.macro-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.macro-card-label {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.macro-pill {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.13);
+  color: var(--text);
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
+.macro-card-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.macro-card-change {
+  margin-top: 4px;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.macro-meter {
+  width: 100%;
+  height: 8px;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.8);
+  overflow: hidden;
+}
+
+.macro-meter-fill {
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.macro-card.state-watch .macro-meter-fill {
+  background: #f59e0b;
+}
+
+.macro-card.state-hostile .macro-meter-fill {
+  background: var(--red);
+}
+
+.macro-card.state-unknown .macro-meter-fill {
+  background: var(--muted);
+}
+
+.macro-matrix {
+  display: grid;
+  grid-template-columns: minmax(76px, 0.7fr) repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto repeat(2, minmax(78px, auto));
+  gap: 6px;
+  min-width: 0;
+}
+
+.matrix-corner,
+.matrix-axis,
+.matrix-cell {
+  border-radius: 10px;
+}
+
+.matrix-axis {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px;
+  background: rgba(31, 41, 55, 0.78);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.matrix-axis.side {
+  min-height: 78px;
+}
+
+.matrix-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 78px;
+  padding: 10px;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  background: rgba(15, 23, 42, 0.65);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.matrix-cell strong {
+  font-size: 0.9rem;
+}
+
+.matrix-cell span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.matrix-cell.is-active {
+  border-width: 2px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.11) inset;
+}
+
+.matrix-cell.is-active.tone-good {
+  border-color: rgba(34, 197, 94, 0.9);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.28), rgba(15, 23, 42, 0.72));
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.18) inset, 0 0 24px rgba(34, 197, 94, 0.18);
+}
+
+.matrix-cell.is-active.tone-warning {
+  border-color: rgba(245, 158, 11, 0.95);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.32), rgba(15, 23, 42, 0.72));
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.22) inset, 0 0 26px rgba(245, 158, 11, 0.24);
+}
+
+.matrix-cell.is-active.tone-danger {
+  border-color: rgba(239, 68, 68, 0.95);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.34), rgba(15, 23, 42, 0.72));
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.22) inset, 0 0 26px rgba(239, 68, 68, 0.24);
+}
+
+.matrix-cell.is-active strong {
+  color: #ffffff;
+}
+
+.matrix-current-tag {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.35);
+  color: inherit;
+  font-size: 0.67rem;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .charts-column,
 .table-column {
   display: flex;
@@ -353,6 +601,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .macro-body {
+    grid-template-columns: 1fr;
+  }
+
+  .macro-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -391,6 +647,55 @@ body {
 
   .summary-strip {
     grid-template-columns: 1fr;
+  }
+
+  .macro-header,
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .macro-badges,
+  .panel-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .compact-control,
+  .strategy-control {
+    min-width: min(100%, 220px);
+    width: 100%;
+  }
+
+  .macro-body {
+    padding: 10px;
+  }
+
+  .macro-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .macro-matrix {
+    grid-template-columns: minmax(62px, 0.55fr) repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .matrix-axis {
+    font-size: 0.7rem;
+    padding: 6px 4px;
+  }
+
+  .matrix-cell {
+    min-height: 72px;
+    padding: 8px;
+  }
+
+  .matrix-cell strong {
+    font-size: 0.78rem;
+  }
+
+  .matrix-cell span {
+    font-size: 0.7rem;
   }
 
   .chart-wrapper {
