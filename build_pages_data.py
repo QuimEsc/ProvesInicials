@@ -14,6 +14,7 @@ import logic_blue
 import logic_lines
 import logic_ratio
 import logic_red
+import macro_context
 import portfolio_rebalance
 
 ARXIU_TICKERS = "llista_tickers.csv"
@@ -524,6 +525,35 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
         print(
             "AVÍS: no s'ha pogut actualitzar l'estratègia de cartera. "
             f"Es conserven els últims fitxers de rebalanç. Motiu: {exc}"
+        )
+    try:
+        macro_refresh_allowed = _is_refresh_allowed(REFRESH_GROUP_MARKET, now_local)
+        print(
+            "Generant context macro 10Y/DXY... "
+            f"refresh_allowed={macro_refresh_allowed}"
+        )
+        us10y = get_data(
+            macro_context.US10Y_TICKER,
+            force_refresh=force_refresh and macro_refresh_allowed,
+            allow_stale=not macro_refresh_allowed,
+        )
+        dxy = get_data(
+            macro_context.DXY_TICKER,
+            force_refresh=force_refresh and macro_refresh_allowed,
+            allow_stale=not macro_refresh_allowed,
+        )
+        macro_payload = macro_context.build_macro_data(
+            us10y,
+            dxy,
+            generated_at=generated_at,
+            force_refresh=force_refresh and macro_refresh_allowed,
+            allow_stale=not macro_refresh_allowed,
+        )
+        _write_json(output_dir / "macro.json", macro_payload)
+    except Exception as exc:
+        print(
+            "AVÍS: no s'ha pogut actualitzar el context macro. "
+            f"Es conserva l'últim fitxer macro si existeix. Motiu: {exc}"
         )
     print(f"OK. Dades generades en {output_dir}")
 
