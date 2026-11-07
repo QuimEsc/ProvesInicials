@@ -22,7 +22,7 @@ STATE_NEGATIVE = "negatiu"
 CONFIRMATION_WEEKS = 4
 REBALANCE_THRESHOLD_PP = 2.0
 
-DEFAULT_STRATEGY = "secondpass_391_airbag_s3"
+DEFAULT_STRATEGY = "secondpass_391"
 
 SECOND_PASS_391 = {
     "source": "SecondPass 391",
@@ -77,7 +77,7 @@ SECOND_PASS_1207 = {
 }
 
 STRATEGY_CONFIGS = {
-    DEFAULT_STRATEGY: {
+    "secondpass_391_airbag_s3": {
         **SECOND_PASS_391,
         "label": "391 + Airbag S3",
         "airbag_s3": {
@@ -95,12 +95,22 @@ STRATEGY_CONFIGS = {
         **SECOND_PASS_1207,
         "label": "1207",
     },
+    "secondpass_391_ab3_re5": {
+        **SECOND_PASS_391,
+        "label": "391 + AB3_RE5",
+        "airbag_ab3": "RE5",
+    },
+    "secondpass_391_ab3_s3": {
+        **SECOND_PASS_391,
+        "label": "391 + AB3_S3",
+        "airbag_ab3": "S3",
+    },
 }
 
 REGIME_WEIGHTS = {
     REGIME_DEFENSIVE: {"world": 45.0, "nasdaq": 15.0, "cash": 40.0},
     REGIME_NORMAL: {"world": 60.0, "nasdaq": 25.0, "cash": 15.0},
-    REGIME_RISK_ON: {"world": 40.0, "nasdaq": 55.0, "cash": 5.0},
+    REGIME_RISK_ON: {"world": 10.0, "nasdaq": 85.0, "cash": 5.0},
     REGIME_SEMI_DEFENSIVE: {"world": 55.0, "nasdaq": 20.0, "cash": 25.0},
 }
 
@@ -126,10 +136,17 @@ def build_rebalance_data(
     rows_by_strategy = {}
     history_rows = []
     current_history = _current_history_frame(friday_frame, features)
+    execution_calendar = _close_series(msci_world, "world").index.intersection(_close_series(nasdaq, "nasdaq").index)
     for strategy_key, strategy_config in STRATEGY_CONFIGS.items():
+        if strategy_config.get("airbag_ab3"):
+            continue
         friday_history = _run_model(friday_frame, "weekly_friday", strategy_key, strategy_config)
         thursday_history = _run_model(thursday_frame, "weekly_thursday", strategy_key, strategy_config)
         current_rows = _run_model(current_history, "current", strategy_key, strategy_config)
+        for row in friday_history + thursday_history + current_rows:
+            pos = execution_calendar.searchsorted(pd.Timestamp(row["date"]), side="right")
+            row["is_provisional"] = row["review_type"] == "current" and pd.Timestamp(row["date"]) not in friday_frame.index
+            row["execution_date"] = _date_str(execution_calendar[pos]) if pos < len(execution_calendar) and not row["is_provisional"] else None
 
         current_source = current_rows[-1] if current_rows else None
         thursday_source = thursday_history[-1] if thursday_history else None
@@ -152,6 +169,51 @@ def build_rebalance_data(
         for row in friday_history:
             history_rows.append(_history_export_row(row, "weekly_friday"))
 
+    # AB3 has its own daily clock. Ordinary 391/S3/1207 above retain their
+    # existing review logic, including the provisional intraday display.
+    closed_world = _confirmed_closes(msci_world, generated_at)
+    closed_nasdaq = _confirmed_closes(nasdaq, generated_at)
+    if not closed_world.empty and not closed_nasdaq.empty:
+        closed_features = _prepare_features(closed_world, closed_nasdaq, ecb_rate, fed_rate)
+        closed_weekly = _weekly_review_frame(closed_features, "W-FRI")
+        base_history = _run_model(closed_weekly, "weekly_friday", DEFAULT_STRATEGY, STRATEGY_CONFIGS[DEFAULT_STRATEGY])
+        # The validated 391/AB3 history starts in1999; earlier PR closes are
+        # indicator warm-up, not a reconstructed pre1999 391 backtest.
+        daily = _ab3_features(closed_world, closed_nasdaq).loc["1999-01-01":]
+        release = _ab3_s3_release(daily.index, closed_weekly)
+        for strategy_key, config in STRATEGY_CONFIGS.items():
+            if not config.get("airbag_ab3"):
+                continue
+            daily_rows = _run_ab3(daily, base_history, release, strategy_key, config)
+            for item in daily_rows:
+                # Display the same existing score/indicators at the confirmed
+                # close. This observation does not advance the weekly regime.
+                observation = closed_features.loc[pd.Timestamp(item["date"])]
+                blocks, score = _score_row(observation, SECOND_PASS_391)
+                item["ordinary_execution_score"] = item["score"]
+                item["score"] = float(round(score, 2))
+                item["blocks"] = blocks
+                item["metrics"] = _metrics(observation)
+                item["score_asof"] = item["date"]
+            current = daily_rows[-1] if daily_rows else None
+            last_thursday = _ab3_review_snapshot(daily_rows, closed_features, "W-THU")
+            last_friday = _ab3_review_snapshot(daily_rows, closed_features, "W-FRI")
+            # The memory selector changes no AB3 parameter or execution clock.
+            # References are the previous daily target, not a stale weekly trade.
+            panels = _panel_rows(current, last_thursday, last_friday, daily_rows)
+            panels[0]["label"] = "Diari close confirmat"
+            rows_by_strategy[strategy_key] = {
+                "label": config["label"],
+                "rows": panels,
+                "rows_by_official_review": {"friday": panels, "thursday": panels},
+                "execution": "daily_confirmed_close_next_common_close",
+                "ordinary_review": "friday",
+            }
+            history_rows.extend(_history_export_row(row, "daily_close") for row in daily_rows)
+    for key, config in STRATEGY_CONFIGS.items():
+        if key not in rows_by_strategy:
+            rows_by_strategy[key] = {"label": config["label"], "rows": [], "rows_by_official_review": {"friday": [], "thursday": []}}
+
     default_rows = rows_by_strategy[DEFAULT_STRATEGY]["rows"]
     default_rows_by_official = rows_by_strategy[DEFAULT_STRATEGY]["rows_by_official_review"]
     default_config = STRATEGY_CONFIGS[DEFAULT_STRATEGY]
@@ -166,6 +228,7 @@ def build_rebalance_data(
             "default_official_review": "friday",
             "confirmation_weeks": default_config["confirmation_weeks"],
             "rebalance_threshold_pp": REBALANCE_THRESHOLD_PP,
+            "ordinary_regime_weights": REGIME_WEIGHTS,
         },
         "strategy_options": _strategy_options(),
         "official_review_options": [
@@ -356,6 +419,7 @@ def _run_model(
             strategy_config,
         )
         final_regime = _final_regime(current_base, crash_armed, score, row, strategy_config)
+        ordinary_regime = final_regime
         airbag_s3_armed = _update_airbag_s3(airbag_s3_armed, score, row, strategy_config)
         final_regime = _apply_airbag_s3(final_regime, airbag_s3_armed, strategy_config)
         weights = REGIME_WEIGHTS[final_regime]
@@ -375,6 +439,8 @@ def _run_model(
             "crash_fast_armed": bool(crash_armed),
             "airbag_s3_armed": bool(airbag_s3_armed),
             "final_regime": final_regime,
+            "ordinary_regime": ordinary_regime,
+            "ordinary_weights": dict(REGIME_WEIGHTS[ordinary_regime]),
             "weights": dict(weights),
             "reference_weights": dict(previous_weights),
             "diffs": action["diffs"],
@@ -558,7 +624,7 @@ def _action(weights: dict[str, float], reference_weights: dict[str, float]) -> d
         if abs(diff) < 0.01:
             continue
         verb = "Comprar" if diff > 0 else "Vendre"
-        parts.append(f"{verb} {abs(diff):.0f} pp {ASSET_LABELS[asset]}")
+        parts.append(f"{verb} {abs(diff):g} pp {ASSET_LABELS[asset]}")
     return {"required": True, "diffs": diffs, "text": "; ".join(parts)}
 
 
@@ -618,6 +684,8 @@ def _history_export_row(row: dict[str, Any], review_type: str) -> dict[str, Any]
         "strategy_label": row.get("strategy_label"),
         "review_type": review_type,
         "date": row["date"],
+        "execution_date": row.get("execution_date"),
+        "is_provisional": row.get("is_provisional", False),
         "score": row["score"],
         "msci_trend": blocks["msci_trend"]["state"],
         "nasdaq_trend": blocks["nasdaq_trend"]["state"],
@@ -639,6 +707,25 @@ def _history_export_row(row: dict[str, Any], review_type: str) -> dict[str, Any]
         "cash_diff": diffs["cash"],
         "action_required": row["action_required"],
         "action": row["action"],
+        "ordinary_regime": row.get("ordinary_regime", row["final_regime"]),
+        "ordinary_world_weight": row.get("ordinary_weights", weights)["world"],
+        "ordinary_nasdaq_weight": row.get("ordinary_weights", weights)["nasdaq"],
+        "ordinary_cash_weight": row.get("ordinary_weights", weights)["cash"],
+        "ordinary_signal_date": row.get("ordinary_signal_date"),
+        "ordinary_execution_score": row.get("ordinary_execution_score"),
+        "ab3_active": row.get("ab3_active", False),
+        "ab3_decision_active": row.get("ab3_decision_active", False),
+        "ab3_signal": row.get("ab3_signal", False),
+        "ab3_execution": row.get("ab3_execution", False),
+        "ab3_reentry": row.get("ab3_reentry", False),
+        "ab3_signal_date": row.get("ab3_signal_date"),
+        "ab3_execution_date": row.get("ab3_execution_date"),
+        "ab3_reentry_signal_date": row.get("ab3_reentry_signal_date"),
+        "ab3_reentry_date": row.get("ab3_reentry_date"),
+        "ab3_pending_action": row.get("ab3_pending_action"),
+        "ab3_pending_world_weight": (row.get("ab3_pending_weights") or {}).get("world"),
+        "ab3_pending_nasdaq_weight": (row.get("ab3_pending_weights") or {}).get("nasdaq"),
+        "ab3_pending_cash_weight": (row.get("ab3_pending_weights") or {}).get("cash"),
     }
 
 
@@ -675,3 +762,142 @@ def _metrics(row: pd.Series) -> dict[str, float | int | None]:
 
 def _date_str(value: Any) -> str:
     return pd.Timestamp(value).strftime("%Y-%m-%d")
+
+
+def _confirmed_closes(prices: pd.DataFrame, generated_at: str) -> pd.DataFrame:
+    """Do not feed a still-forming Yahoo daily candle into a confirmed AB3 clock.
+
+    Nasdaq regular close is 16:00 America/New_York, including DST. On short
+    sessions this is conservative. Missing closes are never forward-filled here.
+    """
+    now = pd.Timestamp(generated_at)
+    now = now.tz_localize("UTC") if now.tzinfo is None else now
+    ny = now.tz_convert("America/New_York")
+    close = _close_series(prices, "Close")
+    if close.index.tz is not None:
+        close.index = close.index.tz_localize(None)
+    today = pd.Timestamp(ny.date())
+    mask = (close.index < today) | ((close.index == today) & (ny.hour >= 16))
+    return close.loc[mask & close.gt(0)].to_frame("Close")
+
+
+def _ab3_features(world: pd.DataFrame, nasdaq: pd.DataFrame) -> pd.DataFrame:
+    """CODEX_AB3 airbag_core.features: PR prices on the common daily calendar."""
+    a = _close_series(nasdaq, "a")
+    d = _close_series(world, "d")
+    ix = a.index.intersection(d.index)
+    f = pd.DataFrame({"a": a.reindex(ix), "d": d.reindex(ix)}, index=ix)
+    r = f.a.pct_change()
+    f["r10"] = f.a.pct_change(10)
+    f["ma20"] = f.a.rolling(20).mean()
+    f["ma200"] = f.a.rolling(200).mean()
+    f["prior_sigma"] = r.rolling(63).std().shift(1)
+    f["volratio"] = (r.rolling(5).std() * np.sqrt(252)) / (f.prior_sigma * np.sqrt(252))
+    for n in [10, 20]:
+        f[f"above{n}"] = (f.a > f.a.rolling(n).mean()).astype(int)
+        f[f"two{n}"] = f[f"above{n}"].rolling(2).sum().eq(2)
+    f["ready"] = f.ma200.notna() & f.prior_sigma.notna()
+    f["trigger"] = (f.r10 <= -.08) & (f.a < f.ma20) & (f.a.shift(1) < f.ma20.shift(1)) & f.ready
+    f["RE5"] = (f.two10 & (f.volratio < 1.5)) | f.two20
+    return f
+
+
+def _ab3_s3_release(dates: pd.DatetimeIndex, weekly: pd.DataFrame) -> np.ndarray:
+    """Frozen weekly release mapping. This is not the S3 entry detector/cap."""
+    release = np.zeros(len(dates), dtype=bool)
+    config = STRATEGY_CONFIGS["secondpass_391_airbag_s3"]
+    for date, row in weekly.iterrows():
+        pos = dates.searchsorted(date + pd.Timedelta(days=1))
+        if 0 < pos <= len(dates) and date <= dates[-1]:
+            score = _score_row(row, SECOND_PASS_391)[1]
+            release[pos - 1] = not _update_airbag_s3(True, score, row, config)
+    return release
+
+
+def _ab3_states(features: pd.DataFrame, trigger: np.ndarray, reentry: str, weekly_release: np.ndarray):
+    """Port of frozen overlay_states for ONLY AB3_RE5 and AB3_S3.
+
+    Signal at t, target execution at t+1; minimum3, cooldown5. A second
+    alarm while protected is ignored. Neither model has a partial reentry.
+    """
+    if reentry not in {"RE5", "S3"}:
+        raise ValueError("Reentrada AB3 no admesa")
+    n = len(features)
+    decision = np.zeros(n)
+    active = False
+    held = cool = 0
+    events = []
+    for i in range(n):
+        if active:
+            held += 1
+            leave = bool(weekly_release[i]) if reentry == "S3" else bool(features.RE5.iloc[i])
+            if held >= 3 and leave:
+                active = False
+                cool = 5
+                events[-1]["release_signal"] = i
+                events[-1]["release_execution"] = i + 1 if i + 1 < n else None
+        elif cool > 0:
+            cool -= 1
+        elif trigger[i]:
+            active = True
+            held = 0
+            events.append({"signal": i, "execution": i + 1 if i + 1 < n else None, "release_signal": None, "release_execution": None})
+        decision[i] = float(active)
+    return np.r_[0., decision[:-1]], decision, events
+
+
+def _run_ab3(daily: pd.DataFrame, ordinary: list[dict[str, Any]], release: np.ndarray,
+             strategy: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+    if daily.empty or not ordinary:
+        return []
+    dates = daily.index
+    reviews = pd.DatetimeIndex([r["date"] for r in ordinary])
+    positions = reviews.searchsorted(dates, side="left") - 1
+    trigger = daily.trigger.to_numpy() & (positions >= 0)
+    levels, decisions, events = _ab3_states(daily, trigger, config["airbag_ab3"], release)
+    signals = {e["signal"]: e for e in events}
+    executions = {e["execution"] for e in events if e["execution"] is not None}
+    reentries = {e["release_execution"] for e in events if e["release_execution"] is not None}
+    rows = []
+    previous = dict(REGIME_WEIGHTS[REGIME_NORMAL])
+    last_event = None
+    for i, date in enumerate(dates):
+        if i in signals:
+            last_event = signals[i]
+        if positions[i] < 0:
+            continue
+        source = ordinary[positions[i]]
+        base = dict(source["weights"])
+        weights = {asset: base[asset] * (1 - .5 * levels[i]) for asset in ["world", "nasdaq"]}
+        weights["cash"] = 100. - weights["world"] - weights["nasdaq"]
+        action = _action(weights, previous)
+        item = dict(source, strategy=strategy, strategy_label=config["label"], review_type="daily_close", date=_date_str(date),
+                    ordinary_regime=source["final_regime"], ordinary_weights=base, ordinary_signal_date=source["date"],
+                    airbag_s3_armed=False, ab3_active=bool(levels[i]), ab3_decision_active=bool(decisions[i]),
+                    ab3_signal=i in signals, ab3_execution=i in executions, ab3_reentry=i in reentries,
+                    ab3_reentry_rule=config["airbag_ab3"], weights=weights, reference_weights=dict(previous),
+                    diffs=action["diffs"], action_required=action["required"], action=action["text"],
+                    ab3_pending_action=None, ab3_pending_weights=None)
+        if last_event is not None:
+            for field, key in [("ab3_signal_date", "signal"), ("ab3_execution_date", "execution"), ("ab3_reentry_signal_date", "release_signal"), ("ab3_reentry_date", "release_execution")]:
+                pos = last_event[key]
+                item[field] = _date_str(dates[pos]) if pos is not None and pos <= i else None
+        future_source = ordinary[reviews.searchsorted(date, side="right") - 1]
+        target = {asset: future_source["weights"][asset] * (1 - .5 * decisions[i]) for asset in ["world", "nasdaq"]}
+        target["cash"] = 100. - target["world"] - target["nasdaq"]
+        if levels[i] != decisions[i] or any(abs(target[a] - weights[a]) > 1e-10 for a in target):
+            item["ab3_pending_action"] = ("proteccio" if decisions[i] else "reentrada") if levels[i] != decisions[i] else "reequilibri 391"
+            item["ab3_pending_weights"] = target
+            item["ab3_pending_order"] = _action(target, weights)["text"]
+        rows.append(item)
+        previous = weights
+    return rows
+
+
+def _ab3_review_snapshot(rows: list[dict[str, Any]], features: pd.DataFrame, rule: str):
+    frame = _weekly_review_frame(features, rule)
+    if frame.empty:
+        return None
+    stamp = _date_str(frame.index[-1])
+    matches = [row for row in rows if row["date"] <= stamp]
+    return matches[-1] if matches else None

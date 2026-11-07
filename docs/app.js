@@ -40,7 +40,7 @@
     summary: null,
     rebalance: null,
     macro: null,
-    rebalanceStrategy: localStorage.getItem('dashboard-rebalance-strategy') || 'secondpass_391_airbag_s3',
+    rebalanceStrategy: localStorage.getItem('dashboard-rebalance-strategy') || 'secondpass_391',
     officialMemory: localStorage.getItem('dashboard-official-memory') || 'friday',
     tickerData: null,
     vixData: null,
@@ -198,7 +198,7 @@
       renderRebalanceTable();
     });
     dom.strategySelect.addEventListener('change', (event) => {
-      state.rebalanceStrategy = event.target.value || 'secondpass_391_airbag_s3';
+      state.rebalanceStrategy = event.target.value || 'secondpass_391';
       localStorage.setItem('dashboard-rebalance-strategy', state.rebalanceStrategy);
       renderRebalanceTable();
     });
@@ -502,7 +502,7 @@
     const strategyOptions = state.rebalance?.strategy_options || [];
     const strategiesByKey = state.rebalance?.rows_by_strategy || {};
     const validStrategyValues = strategyOptions.map((item) => item.value);
-    const defaultStrategy = state.rebalance?.meta?.default_strategy || 'secondpass_391_airbag_s3';
+    const defaultStrategy = state.rebalance?.meta?.default_strategy || 'secondpass_391';
     if (!validStrategyValues.includes(state.rebalanceStrategy) || !strategiesByKey[state.rebalanceStrategy]) {
       state.rebalanceStrategy = strategiesByKey[defaultStrategy] ? defaultStrategy : (validStrategyValues[0] || defaultStrategy);
     }
@@ -520,6 +520,7 @@
     }
 
     const strategyData = strategiesByKey[state.rebalanceStrategy] || state.rebalance || {};
+    document.querySelector('.rebalance-table thead th:nth-child(7)').textContent = strategyData.execution ? 'Pesos efectius' : 'Pesos objectiu';
     const options = state.rebalance?.official_review_options || [];
     const validValues = options.map((item) => item.value);
     if (!validValues.includes(state.officialMemory)) {
@@ -543,16 +544,25 @@
     rows.forEach((row) => {
       if (!row?.available) return;
       const tr = document.createElement('tr');
-      tr.classList.toggle('needs-action', Boolean(row.action_required));
+      const needsAction = Boolean(row.action_required || row.ab3_pending_action);
+      tr.classList.toggle('needs-action', needsAction);
+      const protection = row.ab3_active ? 'AB3 actiu · ' : row.ab3_pending_action === 'proteccio' ? 'AB3 pendent · ' : '';
+      const finalRegime = `${protection}${row.final_regime || '-'}`;
+      const weightKind = row.ab3_reentry_rule ? 'Pesos efectius' : 'Pesos objectiu';
+      const pendingWeights = row.ab3_pending_weights ? ` Objectiu pendent: ${formatWeights(row.ab3_pending_weights)}.` : '';
+      const weightsTitle = row.ordinary_weights ? `Règim ordinari ${row.ordinary_regime || row.final_regime}: ${formatWeights(row.ordinary_weights)}. ${weightKind}: ${formatWeights(row.weights)}.${pendingWeights}` : '';
+      const dateTitle = row.ab3_reentry_rule ? 'Tancament diari confirmat; les noves ordres són per al pròxim tancament comú.' : row.is_provisional ? 'Estimació actual; no és una nova confirmació setmanal.' : `Data de revisió. Execució al tancament comú següent${row.execution_date ? `: ${row.execution_date}` : ' disponible'}.`;
+      const pending = row.ab3_pending_action ? `Pendent al pròxim tancament comú: ${row.ab3_pending_order || row.ab3_pending_action}` : '';
+      const actionText = pending && !row.action_required ? pending : [row.action || '-', pending].filter(Boolean).join(' · ');
       tr.innerHTML = `
         <td>${escapeHtml(row.label || '-')}</td>
-        <td>${escapeHtml(row.date || '-')}</td>
+        <td title="${escapeHtml(dateTitle)}">${escapeHtml(row.date || '-')}</td>
         <td>${formatScore(row.score)}</td>
         <td>${escapeHtml(row.base_regime || '-')}</td>
         <td>${row.crash_fast_armed ? 'Sí' : 'No'}</td>
-        <td>${escapeHtml(row.final_regime || '-')}</td>
-        <td>${formatWeights(row.weights)}</td>
-        <td class="${row.action_required ? 'negative' : 'positive'}">${escapeHtml(row.action || '-')}</td>
+        <td>${escapeHtml(finalRegime)}</td>
+        <td title="${escapeHtml(weightsTitle)}">${formatWeights(row.weights)}</td>
+        <td title="${escapeHtml(actionText)}" class="${needsAction ? 'negative' : 'positive'}">${escapeHtml(actionText)}</td>
       `;
       dom.rebalanceTableBody.appendChild(tr);
     });
@@ -746,7 +756,7 @@
       return '-';
     }
     return `${new Intl.NumberFormat('ca-ES', {
-      maximumFractionDigits: 0,
+      maximumFractionDigits: 1,
     }).format(Number(value))}%`;
   }
 
