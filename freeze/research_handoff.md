@@ -1,6 +1,6 @@
 # HANDOFF GENERAL 391
 
-Actualitzat: 2026-11-08T20:41:42+01:00. Commit de les regles: `pendent de commit`. Congelació efectiva: **pendent de fixació immutable**. Primera sessió admissible: **2026-11-09 prevista, condicionada a congelació/publicació**. Publicació: **en curs; encara no declarada completada**.
+Actualitzat: 2026-11-08T20:45:31+01:00. Commit de les regles: `5dab23ad31ff33fa2a760b247c19ae627c87ab4f`. Congelació efectiva: **2026-11-08T20:45:20+01:00**. Primera sessió admissible: **2026-11-09**. Publicació: **en curs; encara no declarada completada**.
 
 ## A. Origen de la 391 i de la 391*
 

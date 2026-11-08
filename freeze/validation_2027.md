@@ -1,6 +1,6 @@
 # Protocol de validació 2027
 
-Preparat: 2026-11-08T20:41:42+01:00. Commit de regles: `pendent de commit`. Congelació efectiva: **pendent de fixació immutable**. Primera sessió admissible: **2026-11-09 prevista, condicionada a congelació/publicació**.
+Preparat: 2026-11-08T20:45:31+01:00. Commit de regles: `5dab23ad31ff33fa2a760b247c19ae627c87ab4f`. Congelació efectiva: **2026-11-08T20:45:20+01:00**. Primera sessió admissible: **2026-11-09**.
 
 ## 1. Dates i separació de l’evidència
 

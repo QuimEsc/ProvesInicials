@@ -1,16 +1,16 @@
 # Models congelats 2026
 
-Congelació efectiva: PENDENT DE FIXACIÓ IMMUTABLE. Commit `PENDENT DE COMMIT`. Primera sessió admissible: 2026-11-09 (prevista; pendent de congelació efectiva).
+Congelació efectiva: 2026-11-08T20:45:20+01:00. Commit `5dab23ad31ff33fa2a760b247c19ae627c87ab4f`. Primera sessió admissible: 2026-11-09.
 
-| id                          | nom                 | versio                   | base   | reentrada    | commit            |
-|:----------------------------|:--------------------|:-------------------------|:-------|:-------------|:------------------|
-| secondpass_391              | 391*                | 391-freeze-2026-11-08-v1 | 391*   | ordinària    | PENDENT DE COMMIT |
-| secondpass_391_vp1_2ma      | 391* + VP1_2MA      | 391-freeze-2026-11-08-v1 | 391*   | VP1_2MA      | PENDENT DE COMMIT |
-| secondpass_391_ab3_re5      | 391* + AB3_RE5      | 391-freeze-2026-11-08-v1 | 391*   | RE5          | PENDENT DE COMMIT |
-| secondpass_391_vp1_original | 391* + VP1 original | 391-freeze-2026-11-08-v1 | 391*   | VP1_ORIGINAL | PENDENT DE COMMIT |
-| secondpass_391_ab3_s3       | 391* + AB3_S3       | 391-freeze-2026-11-08-v1 | 391*   | S3           | PENDENT DE COMMIT |
-| secondpass_391_airbag_s3    | 391* + Airbag S3    | 391-freeze-2026-11-08-v1 | 391*   | S3 original   | PENDENT DE COMMIT |
-| secondpass_1207             | 1207                | 391-freeze-2026-11-08-v1 | 1207   | ordinària    | PENDENT DE COMMIT |
+| id                          | nom                 | versio                   | base   | reentrada    | commit                                   |
+|:----------------------------|:--------------------|:-------------------------|:-------|:-------------|:-----------------------------------------|
+| secondpass_391              | 391*                | 391-freeze-2026-11-08-v1 | 391*   | ordinària    | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
+| secondpass_391_vp1_2ma      | 391* + VP1_2MA      | 391-freeze-2026-11-08-v1 | 391*   | VP1_2MA      | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
+| secondpass_391_ab3_re5      | 391* + AB3_RE5      | 391-freeze-2026-11-08-v1 | 391*   | RE5          | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
+| secondpass_391_vp1_original | 391* + VP1 original | 391-freeze-2026-11-08-v1 | 391*   | VP1_ORIGINAL | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
+| secondpass_391_ab3_s3       | 391* + AB3_S3       | 391-freeze-2026-11-08-v1 | 391*   | S3           | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
+| secondpass_391_airbag_s3    | 391* + Airbag S3    | 391-freeze-2026-11-08-v1 | 391*   | S3 original   | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
+| secondpass_1207             | 1207                | 391-freeze-2026-11-08-v1 | 1207   | ordinària    | 5dab23ad31ff33fa2a760b247c19ae627c87ab4f |
 
 La font normativa és `portfolio_rebalance.py`, configuració exacta `freeze/parameters.json` i SHA256 a `freeze/manifest.json`. Identitat delcommit de regles a `freeze/identity.json` (fitxer separat per evitar una autoreferència impossible). La configuració JSON conté tots els pesos/llindars de 391 i 1207 sense arrodonir-los. Fonts PRYahoo World/NDX i BCE/FED originals; cash DFF. Les observacions posteriors a 05/11/2026 no formenpart delbacktest auditat.
 
