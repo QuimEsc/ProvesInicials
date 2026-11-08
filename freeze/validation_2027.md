@@ -1,6 +1,6 @@
 # Protocol de validació 2027
 
-Preparat: 2026-11-08T20:52:18+01:00. Commit de regles: `3723b933780691f9c54bb6723f44da454ba38af3`. Congelació efectiva: **2026-11-08T20:52:13+01:00**. Primera sessió admissible: **2026-11-09**.
+Preparat: 2026-11-08T21:00:48+01:00. Commit de regles: `3723b933780691f9c54bb6723f44da454ba38af3`. Congelació efectiva: **2026-11-08T20:52:13+01:00**. Primera sessió admissible: **2026-11-09**.
 
 ## 1. Dates i separació de l’evidència
 
@@ -63,10 +63,14 @@ Per episodi comparar detecció i execució, pèrdua prèvia, reentrada després 
 Des de `C:\Users\User\CodexProjects\ProvesInicials-VP1-freeze`, amb les dependències originals:
 
 ```powershell
+Set-Location -LiteralPath 'C:\Users\User\CodexProjects\ProvesInicials-VP1-freeze'
+$taskPython = 'G:\Mi unidad\CursBorsa\Python_Dashboard\Codex\Bitcoin_compra\ESTRATEGIA_CARTERA_MIXTA\.venv\Scripts\python.exe'
 $env:PYTHONDONTWRITEBYTECODE='1'
-python prospective_tracking.py verify --base-dir .
-python -m unittest discover -s tests -v
-python prospective_tracking.py annual --base-dir . --output-dir tracking/review_2027
+$env:TEMP = 'G:\Mi unidad\CursBorsa\Python_Dashboard\Codex\Bitcoin_compra\ESTRATEGIA_CARTERA_MIXTA\CODEX_CONGELACIO_2026\tmp'
+$env:TMP = $env:TEMP
+& $taskPython prospective_tracking.py verify --base-dir .
+& $taskPython -m unittest discover -s tests -v
+& $taskPython prospective_tracking.py annual --base-dir . --output-dir tracking/review_2027
 ```
 
 Només per un informe intermedi explícit, afegir `--allow-partial`. Sense sessions o amb inici/final incomplets, la comparació anual per defecte falla. No s’ha executat una validació amb dades futures inexistents.
