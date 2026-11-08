@@ -16,6 +16,10 @@ on:
       - logic_ratio.py
       - logic_red.py
       - portfolio_rebalance.py
+      - prospective_tracking.py
+      - freeze/parameters.json
+      - freeze/manifest.json
+      - freeze/identity.json
       - llista_tickers.csv
       - requirements.txt
       - .github/workflows/update-pages-data.yml
@@ -67,11 +71,16 @@ jobs:
           fi
           python build_pages_data.py --base-dir . --output-dir docs/data --force-refresh $RATE_ARGS
 
+      - name: Verify frozen rules, registry and daily model regressions
+        run: |
+          python prospective_tracking.py verify --base-dir .
+          python -m unittest discover -s tests -v
+
       - name: Commit generated files and updated CSV history
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/data dades_historiques
+          git add docs/data dades_historiques tracking
           if git diff --staged --quiet; then
             echo "No hi ha canvis per a fer commit"
           else

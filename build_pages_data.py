@@ -310,14 +310,14 @@ def _write_json(path: Path, payload) -> None:
     text = json.dumps(_clean_for_json(payload), ensure_ascii=False, separators=(",", ":"))
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="")
 
 
 def _write_text_if_changed(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="")
 
 
 def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *, refresh_rates: bool = False) -> None:
@@ -508,6 +508,7 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
         if stale_path.name not in generated_ticker_files:
             stale_path.unlink()
 
+    tracking_inputs = None
     try:
         print(f"Generant estratègia de cartera... refresh_rates={refresh_rates}")
         ecb_rate = get_ecb_deposit_rate(force_refresh=refresh_rates, allow_stale=not refresh_rates)
@@ -521,11 +522,20 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
         )
         _write_json(output_dir / "rebalance.json", rebalance_payload)
         _write_text_if_changed(output_dir / "rebalance_history.csv", rebalance_history.to_csv(index=False))
+        tracking_inputs = (
+            price_data_by_ticker[portfolio_rebalance.MSCI_WORLD_TICKER.upper()],
+            price_data_by_ticker[portfolio_rebalance.NASDAQ_TICKER.upper()], ecb_rate, fed_rate,
+        )
     except Exception as exc:
         print(
             "AVÍS: no s'ha pogut actualitzar l'estratègia de cartera. "
             f"Es conserven els últims fitxers de rebalanç. Motiu: {exc}"
         )
+    if tracking_inputs is not None:
+        # Integrity/registry errors must fail the build, not silently publish a
+        # changed frozen rule or rewrite a historical observation.
+        from prospective_tracking import record_from_inputs
+        print("Registre de seguiment:", record_from_inputs(base_dir, *tracking_inputs, generated_at))
     try:
         macro_refresh_allowed = _is_refresh_allowed(REFRESH_GROUP_MARKET, now_local)
         print(

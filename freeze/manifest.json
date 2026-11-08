@@ -1,0 +1,23 @@
+{
+  "version": "391-freeze-2026-11-08-v1",
+  "created_at": "2026-11-08T20:38:44+01:00",
+  "text_hash_convention": "UTF8 Git canonical LF; raw research/data manifests remain byte-exact",
+  "sha256": {
+    "portfolio_rebalance.py": "d17342894742226504124865dc5dc53cae52b3a8a0f98d73428a65f1d3aa2010",
+    "prospective_tracking.py": "9f02897b94fce0af594def74ae53f7f89c6af5d90d13660047ac4f2712573208",
+    "build_pages_data.py": "eaaacbe38456637f5420b2dc0e89cf6b838a5ccaa3e5f290e79fd416acdd6aa9",
+    "data_manager.py": "d7040f8144fba7106e1e0e9c45142002340f72e4dc196112bfc21be01c22c9f4",
+    "macro_context.py": "fc2a3f083fc6b7013037bc46e68c8de05f852a71441f0e5931a69b33295519d9",
+    "logic_blue.py": "b8e06990f8823607968c6d9bdcffb295241ba3d93adee1b04d08799dfddf78ef",
+    "logic_lines.py": "290c92790d80cc4d6ca11c057edddd5a25e6b2b41c288a98b9e477610d311a58",
+    "logic_ratio.py": "eae836ca2a2b4736d86f0ba72c237e30bc17d67155dbfaac731e540d4c0586d7",
+    "logic_red.py": "b75843c82bee0f76d5a71eadb6c4f6d702c1e522d4c52561554354aaf3685e97",
+    "docs/index.html": "afba2f00317e3dc00ead0ae76b224880eea6b81872023fd631198c159ad81efd",
+    "docs/app.js": "5a9fd1bea26fa55836ed4ed89f71b776bb08ecb313319ebb66612c3cc1f41b12",
+    "docs/styles.css": "8434c67034d587aed2df289b1bb6a07225817d0f4a0c4a6c3887eb945e8a72e8",
+    "requirements.txt": "15adb088cc892ec448f5e28f6e6c18eb77d5317fb116800b6c7c254a0e602ce9",
+    ".github/workflows/update-pages-data.yml": "680e60ba43080286b73a146882ea4f82559d64f30687e7f9c2c49b2eacceece9",
+    "freeze/parameters.json": "52962cfc9eaa05397af7a0d6cdfd8680cb16663e9e53414aa35995f94e9d1466",
+    "freeze/research_sources_sha256.csv": "ac283ea6b980def8d2572c5bf9f8e812fda3648aae4cf9a7e0fd5ec268ce95fa"
+  }
+}

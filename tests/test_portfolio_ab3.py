@@ -11,7 +11,7 @@ import pandas as pd
 import portfolio_rebalance as p
 
 FIX=Path(__file__).parent/'fixtures'
-LABELS=['391 + Airbag S3','391','1207','391 + AB3_RE5','391 + AB3_S3']
+LABELS=['391*','391* + VP1_2MA','391* + AB3_RE5','391* + VP1 original','391* + AB3_S3','391* + Airbag S3','1207']
 
 def reference():
  f=pd.read_csv(FIX/'ab3_daily_reference.csv',index_col=0,parse_dates=True)
@@ -31,8 +31,8 @@ class AB3Tests(unittest.TestCase):
    key='secondpass_391_ab3_'+rule.lower();cls.rows[rule]=p._run_ab3(cls.f,cls.ordinary,cls.f.release.to_numpy(),key,p.STRATEGY_CONFIGS[key])
 
  def test_exact_option_names_order_identifiers_and_default(self):
-  options=p._strategy_options();self.assertEqual([r['label'] for r in options],LABELS);self.assertEqual(len({r['value'] for r in options}),5)
-  self.assertEqual([r['value'] for r in options[:3]],['secondpass_391_airbag_s3','secondpass_391','secondpass_1207']);self.assertEqual(p.DEFAULT_STRATEGY,'secondpass_391')
+  options=p._strategy_options();self.assertEqual([r['label'] for r in options],LABELS);self.assertEqual(len({r['value'] for r in options}),7)
+  self.assertEqual([r['value'] for r in options],['secondpass_391','secondpass_391_vp1_2ma','secondpass_391_ab3_re5','secondpass_391_vp1_original','secondpass_391_ab3_s3','secondpass_391_airbag_s3','secondpass_1207']);self.assertEqual(p.DEFAULT_STRATEGY,'secondpass_391')
 
  def test_four_ordinary_regimes_for_every_strategy(self):
   expected={'defensiu':(45,15,40),'semi-defensiu':(55,20,25),'normal':(60,25,15),'risc-on':(10,85,5)}

@@ -40,7 +40,8 @@
     summary: null,
     rebalance: null,
     macro: null,
-    rebalanceStrategy: localStorage.getItem('dashboard-rebalance-strategy') || 'secondpass_391',
+    // The frozen observation protocol always opens on the ordinary391*.
+    rebalanceStrategy: 'secondpass_391',
     officialMemory: localStorage.getItem('dashboard-official-memory') || 'friday',
     tickerData: null,
     vixData: null,
@@ -520,6 +521,7 @@
     }
 
     const strategyData = strategiesByKey[state.rebalanceStrategy] || state.rebalance || {};
+    dom.strategySelect.title = strategyData.research_status || '';
     document.querySelector('.rebalance-table thead th:nth-child(7)').textContent = strategyData.execution ? 'Pesos efectius' : 'Pesos objectiu';
     const options = state.rebalance?.official_review_options || [];
     const validValues = options.map((item) => item.value);
@@ -546,7 +548,8 @@
       const tr = document.createElement('tr');
       const needsAction = Boolean(row.action_required || row.ab3_pending_action);
       tr.classList.toggle('needs-action', needsAction);
-      const protection = row.ab3_active ? 'AB3 actiu · ' : row.ab3_pending_action === 'proteccio' ? 'AB3 pendent · ' : '';
+      const protectionName = row.vp1_variant === 'VP1_2MA' ? 'VP1_2MA' : row.vp1_variant ? 'VP1 original' : 'AB3';
+      const protection = row.ab3_active ? `${protectionName} actiu · ` : row.ab3_pending_action === 'proteccio' ? `${protectionName} pendent · ` : '';
       const finalRegime = `${protection}${row.final_regime || '-'}`;
       const weightKind = row.ab3_reentry_rule ? 'Pesos efectius' : 'Pesos objectiu';
       const pendingWeights = row.ab3_pending_weights ? ` Objectiu pendent: ${formatWeights(row.ab3_pending_weights)}.` : '';

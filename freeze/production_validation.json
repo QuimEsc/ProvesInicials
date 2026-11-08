@@ -1,0 +1,65 @@
+{
+  "baseline_commit": "59d19342114318f25eb6b5de2c0938c312cf8f9b",
+  "source": "CODEX_VP1_DOBLE_VERIFICACIO immutable files",
+  "cost_bps": 50,
+  "comparisons": 51,
+  "failures": 0,
+  "max_relative_error": 2.304040204609626e-15,
+  "portfolio_source_sha256_git_lf": "d17342894742226504124865dc5dc53cae52b3a8a0f98d73428a65f1d3aa2010",
+  "results": {
+    "BASE": {
+      "n": 131,
+      "cagr_p50": 0.11542913382470066,
+      "mdd_p95": 0.41650573920808565,
+      "dates": [
+        "2000-12-29",
+        "2026-11-05"
+      ]
+    },
+    "AB3_RE5": {
+      "n": 131,
+      "cagr_p50": 0.11653680965690127,
+      "mdd_p95": 0.37604055532088454,
+      "dates": [
+        "2000-12-29",
+        "2026-11-05"
+      ]
+    },
+    "AB3_S3": {
+      "n": 131,
+      "cagr_p50": 0.10977190802782055,
+      "mdd_p95": 0.31821090257604334,
+      "dates": [
+        "2000-12-29",
+        "2026-11-05"
+      ]
+    },
+    "VP1_ORIGINAL": {
+      "n": 131,
+      "cagr_p50": 0.11325462487775595,
+      "mdd_p95": 0.3409575256582118,
+      "dates": [
+        "2000-12-29",
+        "2026-11-05"
+      ]
+    },
+    "VP1_2MA": {
+      "n": 131,
+      "cagr_p50": 0.11248798516047787,
+      "mdd_p95": 0.31988141674149173,
+      "dates": [
+        "2000-12-29",
+        "2026-11-05"
+      ]
+    }
+  },
+  "old_models_equal_except_authorized_labels": {
+    "secondpass_391": 4208,
+    "secondpass_391_airbag_s3": 4208,
+    "secondpass_1207": 4208,
+    "secondpass_391_ab3_re5": 6997,
+    "secondpass_391_ab3_s3": 6997
+  },
+  "local_tests": 34,
+  "local_browser": "7options,default391,7switches,22assets,1440/430,noJSerrors"
+}

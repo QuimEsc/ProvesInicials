@@ -77,9 +77,34 @@ SECOND_PASS_1207 = {
 }
 
 STRATEGY_CONFIGS = {
+    "secondpass_391": {
+        **SECOND_PASS_391,
+        "label": "391*",
+    },
+    "secondpass_391_vp1_2ma": {
+        **SECOND_PASS_391,
+        "label": "391* + VP1_2MA",
+        "airbag_ab3": "VP1_2MA",
+        "research_status": "Variant exploratòria post hoc; en observació prospectiva, sense superioritat futura demostrada.",
+    },
+    "secondpass_391_ab3_re5": {
+        **SECOND_PASS_391,
+        "label": "391* + AB3_RE5",
+        "airbag_ab3": "RE5",
+    },
+    "secondpass_391_vp1_original": {
+        **SECOND_PASS_391,
+        "label": "391* + VP1 original",
+        "airbag_ab3": "VP1_ORIGINAL",
+    },
+    "secondpass_391_ab3_s3": {
+        **SECOND_PASS_391,
+        "label": "391* + AB3_S3",
+        "airbag_ab3": "S3",
+    },
     "secondpass_391_airbag_s3": {
         **SECOND_PASS_391,
-        "label": "391 + Airbag S3",
+        "label": "391* + Airbag S3",
         "airbag_s3": {
             "drawdown": 0.08,
             "days_since_high": 70,
@@ -87,23 +112,9 @@ STRATEGY_CONFIGS = {
             "release_drawdown": 0.05,
         },
     },
-    "secondpass_391": {
-        **SECOND_PASS_391,
-        "label": "391",
-    },
     "secondpass_1207": {
         **SECOND_PASS_1207,
         "label": "1207",
-    },
-    "secondpass_391_ab3_re5": {
-        **SECOND_PASS_391,
-        "label": "391 + AB3_RE5",
-        "airbag_ab3": "RE5",
-    },
-    "secondpass_391_ab3_s3": {
-        **SECOND_PASS_391,
-        "label": "391 + AB3_S3",
-        "airbag_ab3": "S3",
     },
 }
 
@@ -208,6 +219,7 @@ def build_rebalance_data(
                 "rows_by_official_review": {"friday": panels, "thursday": panels},
                 "execution": "daily_confirmed_close_next_common_close",
                 "ordinary_review": "friday",
+                "research_status": config.get("research_status"),
             }
             history_rows.extend(_history_export_row(row, "daily_close") for row in daily_rows)
     for key, config in STRATEGY_CONFIGS.items():
@@ -789,6 +801,8 @@ def _ab3_features(world: pd.DataFrame, nasdaq: pd.DataFrame) -> pd.DataFrame:
     f = pd.DataFrame({"a": a.reindex(ix), "d": d.reindex(ix)}, index=ix)
     r = f.a.pct_change()
     f["r10"] = f.a.pct_change(10)
+    f["ma10"] = f.a.rolling(10).mean()
+    f["sigma10"] = r.rolling(10).std(ddof=1) * np.sqrt(252)
     f["ma20"] = f.a.rolling(20).mean()
     f["ma200"] = f.a.rolling(200).mean()
     f["prior_sigma"] = r.rolling(63).std().shift(1)
@@ -820,6 +834,8 @@ def _ab3_states(features: pd.DataFrame, trigger: np.ndarray, reentry: str, weekl
     Signal at t, target execution at t+1; minimum3, cooldown5. A second
     alarm while protected is ignored. Neither model has a partial reentry.
     """
+    if reentry in {"VP1_ORIGINAL", "VP1_2MA"}:
+        return _vp1_states(features, trigger, reentry)[:3]
     if reentry not in {"RE5", "S3"}:
         raise ValueError("Reentrada AB3 no admesa")
     n = len(features)
@@ -846,6 +862,51 @@ def _ab3_states(features: pd.DataFrame, trigger: np.ndarray, reentry: str, weekl
     return np.r_[0., decision[:-1]], decision, events
 
 
+def _vp1_states(features: pd.DataFrame, trigger: np.ndarray, variant: str):
+    """CODEX_VP1_DOBLE_VERIFICACIO/src/engine_a.py frozen VP1 rules.
+
+    Each sigma compares with its own causal episode peak. The sole difference
+    of 2MA is the previous close above its previous MA10. No reset on alarms
+    while active; min3, cooldown5, full restore, next common close.
+    """
+    if variant not in {"VP1_ORIGINAL", "VP1_2MA"}:
+        raise ValueError("Variant VP1 no admesa")
+    n = len(features)
+    decision = np.zeros(n)
+    peaks = np.full(n, np.nan)
+    active = False
+    held = cool = 0
+    peak = np.nan
+    events = []
+    sigma = features.sigma10.to_numpy()
+    close = features.a.to_numpy()
+    ma10 = features.ma10.to_numpy()
+    for i in range(n):
+        if active:
+            held += 1
+            previous_peak = peak
+            peak = max(peak, sigma[i])
+            peaks[i] = peak
+            leave = sigma[i] <= .60 * peak and sigma[i-1] <= .60 * previous_peak and close[i] > ma10[i]
+            if variant == "VP1_2MA":
+                leave = leave and close[i-1] > ma10[i-1]
+            if held >= 3 and leave:
+                active = False
+                cool = 5
+                events[-1]["release_signal"] = i
+                events[-1]["release_execution"] = i + 1 if i + 1 < n else None
+        elif cool > 0:
+            cool -= 1
+        elif trigger[i]:
+            active = True
+            held = 0
+            peak = sigma[i]
+            peaks[i] = peak
+            events.append({"signal": i, "execution": i + 1 if i + 1 < n else None, "release_signal": None, "release_execution": None})
+        decision[i] = float(active)
+    return np.r_[0., decision[:-1]], decision, events, peaks
+
+
 def _run_ab3(daily: pd.DataFrame, ordinary: list[dict[str, Any]], release: np.ndarray,
              strategy: str, config: dict[str, Any]) -> list[dict[str, Any]]:
     if daily.empty or not ordinary:
@@ -854,7 +915,11 @@ def _run_ab3(daily: pd.DataFrame, ordinary: list[dict[str, Any]], release: np.nd
     reviews = pd.DatetimeIndex([r["date"] for r in ordinary])
     positions = reviews.searchsorted(dates, side="left") - 1
     trigger = daily.trigger.to_numpy() & (positions >= 0)
-    levels, decisions, events = _ab3_states(daily, trigger, config["airbag_ab3"], release)
+    is_vp1 = config["airbag_ab3"] in {"VP1_ORIGINAL", "VP1_2MA"}
+    if is_vp1:
+        levels, decisions, events, peaks = _vp1_states(daily, trigger, config["airbag_ab3"])
+    else:
+        levels, decisions, events = _ab3_states(daily, trigger, config["airbag_ab3"], release)
     signals = {e["signal"]: e for e in events}
     executions = {e["execution"] for e in events if e["execution"] is not None}
     reentries = {e["release_execution"] for e in events if e["release_execution"] is not None}
@@ -878,6 +943,9 @@ def _run_ab3(daily: pd.DataFrame, ordinary: list[dict[str, Any]], release: np.nd
                     ab3_reentry_rule=config["airbag_ab3"], weights=weights, reference_weights=dict(previous),
                     diffs=action["diffs"], action_required=action["required"], action=action["text"],
                     ab3_pending_action=None, ab3_pending_weights=None)
+        if is_vp1:
+            item.update(vp1_variant=config["airbag_ab3"], vp1_sigma10=float(daily.sigma10.iloc[i]),
+                        vp1_peak_sigma10=float(peaks[i]) if np.isfinite(peaks[i]) else None)
         if last_event is not None:
             for field, key in [("ab3_signal_date", "signal"), ("ab3_execution_date", "execution"), ("ab3_reentry_signal_date", "release_signal"), ("ab3_reentry_date", "release_execution")]:
                 pos = last_event[key]
