@@ -94,6 +94,12 @@ def record_from_inputs(base,world,ndx,ecb,fed,generated_at):
  missing=[str(d.date()) for d in common if previous_date<str(d.date())<session]
  quality='late_gap_not_strictly_observed' if missing and prospective else 'confirmed_common_close' if session>previous_date else 'no_new_common_close_or_source_revision'
  if prospective and missing:prospective=False
+ # A prior decision observed only after today's execution close cannot be
+ # filled retroactively at that close. Keep the receipt, not a false ledger.
+ information_at=pd.Timestamp(previous['generated_at'] if previous else seed['observed_at'])
+ execution_close=pd.Timestamp(session).tz_localize('America/New_York')+pd.Timedelta(hours=16)
+ if prospective and information_at>=execution_close:
+  prospective=False;quality='late_information_after_execution_close'
  # Recalculated latest-vintage decisions are retained separately from the
  # primary append-only canonical input path. They never rewrite a session.
  _,latest_states=model_rows(raw);_,states=model_rows(merged)

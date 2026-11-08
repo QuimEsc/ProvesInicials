@@ -1,0 +1,15 @@
+{
+  "version": "391-freeze-2026-11-08-v1",
+  "rules_commit": "5dab23ad31ff33fa2a760b247c19ae627c87ab4f",
+  "rules_committed_at": "2026-11-08T20:44:25+01:00",
+  "frozen_at": "2026-11-08T20:45:20+01:00",
+  "freeze_evidence": "source branch and annotated tag pushed and verified by git ls-remote before this timestamp",
+  "tag": "391-freeze-2026-11-08",
+  "first_admissible_session": "2026-11-09",
+  "planned_last_session": "2027-11-05",
+  "review_date": "2027-11-08",
+  "manifest_sha256": "7d8927c6016ee9837c976841d7b69ff381289556c7749849a19e93f48756c414",
+  "modern_backtest_cutoff": "2026-11-05",
+  "proxy_cutoff": "2026-09-30",
+  "performance_basis": "PR_USD production feed; audited TR remains a separate retrospective universe"
+}

@@ -1,5 +1,5 @@
 {
-  "version": "391-freeze-2026-11-08-v1",
+  "version": "391-freeze-2026-11-08-v2",
   "created_at": "2026-11-08T20:38:44+01:00",
   "modern_backtest_cutoff": "2026-11-05",
   "historical_proxy_cutoff": "2026-09-30",
@@ -307,5 +307,11 @@
     "false_rebound": "after trough, rally>=5% off running low followed before full peak recovery by drop>=5% off running high; disarm after each drop",
     "hypothesis": "future crises may be shorter/intense; unconfirmed; no rule changes"
   },
-  "no_parameter_search": true
+  "no_parameter_search": true,
+  "technical_revision": {
+    "previous_rules_commit": "5dab23ad31ff33fa2a760b247c19ae627c87ab4f",
+    "change": "reject late-information retrospective paper fills",
+    "models_and_parameters_unchanged": true,
+    "prospective_sessions_existing": 0
+  }
 }

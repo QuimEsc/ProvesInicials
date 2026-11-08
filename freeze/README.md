@@ -6,8 +6,9 @@ Els manifests de dades i recerca mantenen hashes dels bytes originals.
 
 `identity.json` referencia el commit immutable de les regles i la data efectiva.
 Es grava en un commit posterior perquè un fitxer no pot contenir el SHA del
-mateix commit que el crea. L'etiqueta `391-freeze-2026-11-08` identifica el
-commit de regles; la identitat i els documents posteriors en donen el SHA exacte.
+mateix commit que el crea. L'etiqueta `391-freeze-2026-11-08` conserva v1.
+La versió activa v2 usa `391-freeze-2026-11-08-v2`, amb la correcció tècnica
+documentada a `corrections.md`; la identitat en dona el SHA i l'hora exactes.
 
 No modificar silenciosament els fitxers congelats. Un error tècnic exigeix
 conservar la versió antiga, documentar l'impacte i crear una versió nova.

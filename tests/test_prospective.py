@@ -8,9 +8,9 @@ class TrackingTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);(self.root/'freeze').mkdir();(self.root/'dades_historiques').mkdir();(self.root/'rule.py').write_bytes(b'frozen\n');manifest={'sha256':{'rule.py':t.digest((self.root/'rule.py').read_bytes())}};(self.root/'freeze/manifest.json').write_bytes(t.canonical(manifest));identity=dict(rules_commit='0'*40,version='synthetic-historical-test-only',frozen_at='2020-02-26T22:00:00Z',first_admissible_session='2020-02-27',manifest_sha256=t.digest((self.root/'freeze/manifest.json').read_bytes()));(self.root/'freeze/identity.json').write_bytes(t.canonical(identity));pd.DataFrame({'Rate':[2.]},index=pd.to_datetime(['2019-01-01'])).to_csv(self.root/'dades_historiques/DFF.csv',index_label='Date');self.inputs=pd.read_csv(Path(__file__).parent/'fixtures/vp1_frozen_reference.csv.gz',index_col=0,parse_dates=True);self.rate=pd.Series([2.],index=pd.to_datetime(['1999-01-01']))
  def tearDown(self):self.tmp.cleanup()
- def record(self,date,world=None):
+ def record(self,date,world=None,observed_at=None):
   d=self.inputs.loc[:date];w=d.world_pr.to_frame('Close') if world is None else world
-  with patch.object(t.subprocess,'check_output',return_value='1'*40):return t.record_from_inputs(self.root,w,d.nasdaq_pr.to_frame('Close'),self.rate,self.rate,date+'T23:00:00Z')
+  with patch.object(t.subprocess,'check_output',return_value='1'*40):return t.record_from_inputs(self.root,w,d.nasdaq_pr.to_frame('Close'),self.rate,self.rate,observed_at or date+'T23:00:00Z')
  def test_initial_state_not_prospective_and_two_fee_scenarios(self):
   r=self.record('2020-02-26');self.assertFalse(r['prospective_record_written']);r=self.record('2020-02-27');self.assertTrue(r['prospective_record_written']);z=json.loads((self.root/'tracking/sessions/2020-02-27.json').read_text());self.assertEqual(set(z['ledgers']),{'50','10'});self.assertEqual(len(z['models']),7)
   for key in z['models']:self.assertLess(z['ledgers']['50'][key]['nav'],z['ledgers']['10'][key]['nav'])
@@ -26,6 +26,8 @@ class TrackingTests(unittest.TestCase):
   with self.assertRaises(ValueError):self.record('2020-02-26')
  def test_missing_observation_not_fabricated_as_prospective(self):
   self.record('2020-02-26');r=self.record('2020-02-28');self.assertFalse(r['prospective_record_written']);self.assertEqual(r['status'],'late_gap_not_strictly_observed')
+ def test_late_information_cannot_fill_an_already_passed_execution_close(self):
+  self.record('2020-02-26');self.record('2020-02-27',observed_at='2020-02-28T23:00:00Z');r=self.record('2020-02-28',observed_at='2020-03-02T12:00:00Z');self.assertFalse(r['prospective_record_written']);self.assertEqual(r['status'],'late_information_after_execution_close');self.assertFalse((self.root/'tracking/sessions/2020-02-28.json').exists())
  def test_future_year_cannot_be_reported_complete(self):
   self.record('2020-02-26');self.record('2020-02-27')
   with self.assertRaises(ValueError):t.annual(self.root,self.root/'report')
