@@ -1,6 +1,6 @@
 # HANDOFF GENERAL 391
 
-Actualitzat: 2026-11-08T20:45:31+01:00. Commit de les regles: `5dab23ad31ff33fa2a760b247c19ae627c87ab4f`. Congelació efectiva: **2026-11-08T20:45:20+01:00**. Primera sessió admissible: **2026-11-09**. Publicació: **en curs; encara no declarada completada**.
+Actualitzat: 2026-11-08T20:52:18+01:00. Commit de les regles: `3723b933780691f9c54bb6723f44da454ba38af3`. Congelació efectiva: **2026-11-08T20:52:13+01:00**. Primera sessió admissible: **2026-11-09**. Publicació: **en curs; encara no declarada completada**.
 
 ## A. Origen de la 391 i de la 391*
 
@@ -69,7 +69,7 @@ Repositori de treball: `C:\Users\User\CodexProjects\ProvesInicials-VP1-freeze`. 
 
 Canvis: `portfolio_rebalance.py`, `build_pages_data.py`, `docs/index.html`, `docs/app.js`, els dos fitxers de rebalanç generats i elworkflow. Afegits: `prospective_tracking.py`, `freeze/`, `tracking/`, fixtures i tests VP1. CSS, línies, zones, indicadors i altres apartats no s’han redissenyat.
 
-Les cinc estratègies antigues reprodueixen els seus 4208/6997 registres amb inputs idèntics, llevat de l’etiqueta autoritzada.51 contrastos de producció reprodueixen pesos, estats, operacions, fees, rotació,NAV i les 131 finestres congelades.34 tests locals passats. Navegador: set opcions i canvis, default després de recarregar,22 actius, gràfics, macro, timeframes i toggles;1440/430 px, sense errors JS ni desbordament global.
+Les cinc estratègies antigues reprodueixen els seus 4208/6997 registres amb inputs idèntics, llevat de l’etiqueta autoritzada.51 contrastos de producció reprodueixen pesos, estats, operacions, fees, rotació,NAV i les 131 finestres congelades.35 tests locals passats. Navegador: set opcions i canvis, default després de recarregar,22 actius, gràfics, macro, timeframes i toggles;1440/430 px, sense errors JS ni desbordament global.
 
 Elworkflow `update-pages-data.yml` manté la programació existent. Abans del commit del bot verifica les regles congelades, el registre i els tests. Les captures de fonts poden actualitzar-se; els hashes de les regles no. Consultar `REGISTRE_PUBLICACIO_GITHUB.md` per l’estat públic real, elcommit publicat i els runs Actions.
 

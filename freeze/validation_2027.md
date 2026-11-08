@@ -1,6 +1,6 @@
 # Protocol de validació 2027
 
-Preparat: 2026-11-08T20:45:31+01:00. Commit de regles: `5dab23ad31ff33fa2a760b247c19ae627c87ab4f`. Congelació efectiva: **2026-11-08T20:45:20+01:00**. Primera sessió admissible: **2026-11-09**.
+Preparat: 2026-11-08T20:52:18+01:00. Commit de regles: `3723b933780691f9c54bb6723f44da454ba38af3`. Congelació efectiva: **2026-11-08T20:52:13+01:00**. Primera sessió admissible: **2026-11-09**.
 
 ## 1. Dates i separació de l’evidència
 
@@ -36,7 +36,7 @@ Rotació=0,5×volum equity/pre NAV. Guardar també volum brut, cames de compra/v
 
 Els valors de preu ja observats no es reemplaçen en la branca principal. Les noves publicacions macro s’incorporen quan s’observen, sense fer-les retroactives en els comptadors de divendres. Les correccions van en vintages separades; elweb mostra la vintage actual i el registre principal preserva la primera observació. Cal explicar qualsevol divergència.
 
-Senseclose nou no hi ha una nova operació ni fee. Si hi ha sessions intermèdies no capturades, el sistema marca `late_gap_not_strictly_observed`; no les ompli com si s’hagueren observat puntualment. Cal resoldre/documentar la incidència abans de declarar un any complet. No basta arribar a l’última data.
+Senseclose nou no hi ha una nova operació ni fee. Si hi ha sessions intermèdies no capturades, el sistema marca `late_gap_not_strictly_observed`; no les ompli com si s’hagueren observat puntualment. Si la informació de la decisió anterior arriba després del tancament d’execució, marca `late_information_after_execution_close` i no inventa aquella execució. Aquesta protecció tècnica és v 2; v 1 i els seus manifests romanen arxivats, amb zero sessions prospectives i sense canviar els models. Cal resoldre/documentar la incidència abans de declarar un any complet. No basta arribar a l’última data.
 
 Git i els hashes permeten auditar canvis. No prometen immunitat a un esborrat deliberat o force-push del propietari. Els fitxers de regles es verifiquen en format Git LF; els manifests de fonts/dades són de bytes exactes. Qualsevol canvi tècnic exigeix una versió explícita, impacte i conservació de l’antiga.
 
