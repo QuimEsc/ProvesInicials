@@ -1,15 +1,16 @@
 name: Watch dashboard data freshness
 
-# Supervises the heartbeat (generated_at) of docs/data/manifest.json, NOT the
-# quotations: a closed market keeps producing a new heartbeat every run.
-# At >45 min it triggers self-heal (unless update-pages-data.yml is already
-# queued/running). It only raises an alert issue / fails the run if the delay
-# persists beyond 90 min or self-heal cannot run, avoiding false/duplicate alerts.
+# Supervises the effective source check / pipeline heartbeat in docs/data/manifest.json
+# within market operating hours (never the age of unchanged quotations).
+# - Preventive self-heal triggers silently at >45 min (`needs_self_heal = true`).
+# - Primary threshold is 60 min (`stale = true`, exit code 2).
+# - Only opens/updates an alert issue and fails when stale delay persists >= 120 min
+#   in market hours or when self-heal dispatch fails, avoiding false/duplicate alerts.
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "4,19,34,49 * * * *"
+    - cron: "22,52 6-22 * * 1-5"
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Evaluate heartbeat
+      - name: Evaluate freshness
         id: eval
         run: |
           set +e
@@ -41,19 +42,32 @@ jobs:
           CODE=$?
           set -e
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          AGE=$(python -c "import json; r=json.load(open('freshness.json')); v=r.get('repo_age_min'); print(int(float(v)) if v is not None else 99999)")
+          eval "$(python - << 'PY'
+          import json
+          r = json.load(open("freshness.json", encoding="utf-8"))
+          age = r.get("effective_age_min")
+          age_int = int(float(age)) if age is not None else 99999
+          heal = "true" if r.get("needs_self_heal") else "false"
+          active = "true" if r.get("market_active") else "false"
+          print(f"AGE={age_int}")
+          print(f"HEAL={heal}")
+          print(f"MARKET={active}")
+          PY
+          )"
           echo "age_min=$AGE" >> "$GITHUB_OUTPUT"
+          echo "needs_self_heal=$HEAL" >> "$GITHUB_OUTPUT"
+          echo "market_active=$MARKET" >> "$GITHUB_OUTPUT"
 
-      - name: Self-heal when stale
+      - name: Self-heal when delayed in market hours
         id: heal
-        if: steps.eval.outputs.code == '2'
+        if: steps.eval.outputs.needs_self_heal == 'true' || steps.eval.outputs.code == '2'
         run: |
           ACTIVE=$(gh run list --workflow update-pages-data.yml --json status --jq '[.[] | select(.status=="queued" or .status=="in_progress")] | length')
           echo "active=$ACTIVE" >> "$GITHUB_OUTPUT"
           if [ "$ACTIVE" = "0" ]; then
             if gh workflow run update-pages-data.yml --ref main; then
               echo "dispatched=1" >> "$GITHUB_OUTPUT"
-              echo "Auto-reparació activada: s'ha llançat update-pages-data.yml." >> "$GITHUB_STEP_SUMMARY"
+              echo "Auto-reparació silenciosa activada: s'ha llançat update-pages-data.yml." >> "$GITHUB_STEP_SUMMARY"
             else
               echo "dispatched=0" >> "$GITHUB_OUTPUT"
               echo "ERROR: no s'ha pogut llançar update-pages-data.yml." >> "$GITHUB_STEP_SUMMARY"
@@ -66,13 +80,14 @@ jobs:
       - name: Open, update, or close the alert issue (best effort)
         continue-on-error: true
         run: |
-          TITLE="Actualització de dades endarrerida (>45 min)"
+          TITLE="Actualització de dades endarrerida (>60 min en horari de mercat)"
           OPEN=$(gh issue list --state open --search "$TITLE in:title" --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -n 1)
           AGE="${{ steps.eval.outputs.age_min }}"
           CODE="${{ steps.eval.outputs.code }}"
-          if [ "$CODE" = "2" ] && [ "$AGE" -ge 90 ]; then
+          MARKET="${{ steps.eval.outputs.market_active }}"
+          if [ "$CODE" = "2" ] && [ "$MARKET" = "true" ] && [ "$AGE" -ge 120 ]; then
             {
-              echo "Informe del watchdog (retard persistent >= 90 min):"
+              echo "Informe del watchdog (retard persistent >= 120 min en horari de mercat):"
               echo ""
               echo '```json'
               cat freshness.json
@@ -81,15 +96,15 @@ jobs:
             if [ -z "$OPEN" ]; then
               gh issue create --title "$TITLE" --body-file issue_body.md
             else
-              # Edit in place instead of commenting every 15 minutes to avoid duplicate email alerts.
+              # Edit in place instead of commenting every cycle to avoid duplicate email alerts.
               gh issue edit "$OPEN" --body-file issue_body.md
             fi
           elif [ "$CODE" = "0" ] && [ -n "$OPEN" ]; then
             gh issue close "$OPEN" --comment "Dades de nou al dia."
           fi
 
-      - name: Fail when persistent or unrecoverable delay
-        if: steps.eval.outputs.code == '2' && (fromJSON(steps.eval.outputs.age_min) >= 90 || (steps.heal.outputs.dispatched != '1' && steps.heal.outputs.active == '0'))
+      - name: Fail when persistent (>=120 min) or unrecoverable delay in market hours
+        if: steps.eval.outputs.code == '2' && steps.eval.outputs.market_active == 'true' && (fromJSON(steps.eval.outputs.age_min) >= 120 || (steps.heal.outputs.dispatched != '1' && steps.heal.outputs.active == '0'))
         run: |
-          echo "Heartbeat stale for ${{ steps.eval.outputs.age_min }} minutes and could not recover automatically." >&2
+          echo "Market-hours data delay persisted for ${{ steps.eval.outputs.age_min }} minutes and could not recover automatically." >&2
           exit 1

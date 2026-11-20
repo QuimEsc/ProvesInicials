@@ -37,8 +37,8 @@
 
   const AUTO_REFRESH_CHECK_MS = 60 * 1000;
   const MIN_VISIBILITY_CHECK_MS = 20 * 1000;
-  // Heartbeat limit: generated_at is rewritten by every run, even when prices do not change.
-  const STALE_AFTER_MS = 45 * 60 * 1000;
+  // Target 30 min in market hours; tolerate occasional delays up to 60 min without error.
+  const STALE_AFTER_MS = 60 * 60 * 1000;
   const TOGGLE_STORAGE_KEYS = {
     blueZones: 'dashboard-toggle-blue-zones',
     redZones: 'dashboard-toggle-red-zones',
@@ -557,6 +557,28 @@
     queueZoneRedraw();
   }
 
+  function getMarketWindowState(nowMs, diag) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Madrid',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date(nowMs));
+      const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      const hour = Number(map.hour);
+      const minute = Number(map.minute);
+      const isWeekday = !['Sat', 'Sun'].includes(map.weekday);
+      const openNow = isWeekday && Number.isFinite(hour) && hour >= 7 && hour < 23;
+      const minutesIntoWindow = openNow ? ((hour - 7) * 60 + (Number.isFinite(minute) ? minute : 0)) : 0;
+      return { openNow, minutesIntoWindow };
+    } catch {
+      const openFallback = diag?.market_window_open !== false;
+      return { openNow: openFallback, minutesIntoWindow: openFallback ? 120 : 0 };
+    }
+  }
+
   function updateStatusDiagnostic() {
     const data = state.tickerData;
     const meta = data?.meta || {};
@@ -566,6 +588,7 @@
 
     const executedAt = diag.executed_at || state.manifest?.generated_at || null;
     const generatedAt = state.manifest?.generated_at || diag.generated_at || meta.generated_at || null;
+    const sourceCheckedAt = manifestEntry.last_checked_at || null;
     const publishedAt = state.publishedAt || null;
     const checkedAt = state.lastCheckedAt || null;
     const quoteDate = manifestEntry.quote_date || data?.summary?.quote_date || meta.quote_date || getLastCandleDate(data);
@@ -584,27 +607,44 @@
             ? 'nou preu'
             : '';
 
-    const generatedMs = generatedAt ? Date.parse(generatedAt) : NaN;
-    const heartbeatAgeMs = Number.isFinite(generatedMs) ? Date.now() - generatedMs : null;
-    const isStale = heartbeatAgeMs !== null && heartbeatAgeMs > STALE_AFTER_MS;
-    const generatedAge = generatedAt ? formatRelativeAge(generatedAt) : '';
+    const nowMs = Date.now();
+    const effectiveCheckAt = sourceCheckedAt || generatedAt;
+    const effectiveMs = effectiveCheckAt ? Date.parse(effectiveCheckAt) : NaN;
+    const effectiveAgeMs = Number.isFinite(effectiveMs) ? nowMs - effectiveMs : null;
+    const is24h = manifestEntry.refresh_group === '24h';
+    const marketWin = getMarketWindowState(nowMs, diag);
+    const canWarnDelay = marketWin.openNow && marketWin.minutesIntoWindow > 60 && (is24h || diag.market_window_open !== false || marketWin.minutesIntoWindow > 60);
+    const isSourceError = refreshStatus === 'fallback_error';
+    const isStale = Boolean(
+      !isSourceError
+      && canWarnDelay
+      && effectiveAgeMs !== null
+      && effectiveAgeMs > STALE_AFTER_MS
+    );
+
+    const sourceCheckedAge = sourceCheckedAt ? formatRelativeAge(sourceCheckedAt) : '';
+    const executedAge = executedAt ? formatRelativeAge(executedAt) : '';
 
     const parts = [
       tickerLabel,
       `Sessió de cotització: ${quoteDate ? formatDateOnly(quoteDate) : '-'}`,
       `Últim canvi de preu: ${dataUpdatedAt ? formatDateTime(dataUpdatedAt) : '-'}${quoteAgeSuffix}${statusReason ? ` [${statusReason}]` : ''}`,
-      `Última execució: ${executedAt ? formatDateTime(executedAt) : '-'}${generatedAge ? ` (${generatedAge})` : ''}`,
+      `Última consulta font: ${sourceCheckedAt ? formatDateTime(sourceCheckedAt) : '-'}${sourceCheckedAge ? ` (${sourceCheckedAge})` : ''}`,
+      `Última execució: ${executedAt ? formatDateTime(executedAt) : '-'}${executedAge ? ` (${executedAge})` : ''}`,
       `Publicat: ${publishedAt ? formatDateTime(publishedAt) : '-'}`,
       `Comprovat: ${formatShortTime(checkedAt)}`,
     ];
-    if (isStale) {
-      parts.push(`AVÍS: dades generades fa més de 45 min (retard del sistema d'actualització)`);
+    if (isSourceError) {
+      parts.push('AVÍS: la font financera no ha respost (es conserven les últimes dades vàlides)');
+    } else if (isStale) {
+      parts.push('AVÍS: última consulta efectiva fa més de 60 min (horari de mercat)');
     }
     setStatus(parts.join(' · '));
     dom.statusText.title = [
       `Actiu: ${tickerLabel}`,
       `Data real cotització: ${quoteDate ? formatDateOnly(quoteDate) : '-'}`,
       `Últim canvi de cotització detectat: ${dataUpdatedAt ? formatDateTime(dataUpdatedAt) : '-'}`,
+      `Última consulta efectiva a la font: ${sourceCheckedAt ? formatDateTime(sourceCheckedAt) : '-'}`,
       `Última execució workflow: ${executedAt ? formatDateTime(executedAt) : '-'}${diag.run_number ? ` (#${diag.run_number})` : ''}`,
       `Última generació JSON: ${generatedAt ? formatDateTime(generatedAt) : '-'}`,
       `Última publicació Pages (Last-Modified): ${publishedAt ? formatDateTime(publishedAt) : '-'}`,

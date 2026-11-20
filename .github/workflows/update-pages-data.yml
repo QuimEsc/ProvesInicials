@@ -2,13 +2,14 @@ name: Update dashboard data
 
 on:
   workflow_dispatch:
+    inputs:
+      refresh_rates:
+        description: "Forçar refresc de tipus BCE/FED"
+        required: false
+        default: false
+        type: boolean
   schedule:
-    - cron: "7,37 0-3 * * *"
-    - cron: "7,37 4-7 * * *"
-    - cron: "7,37 8-11 * * *"
-    - cron: "7,37 12-15 * * *"
-    - cron: "7,37 16-19 * * *"
-    - cron: "7,37 20-23 * * *"
+    - cron: "7,37 6-22 * * 1-5"
     - cron: "12 3 * * *"
   push:
     branches:
@@ -74,7 +75,7 @@ jobs:
         run: |
           export WORKFLOW_EXECUTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           RATE_ARGS=""
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "12 3 * * *" ]; then
+          if [ "${{ inputs.refresh_rates }}" = "true" ] || [ "${{ github.event.schedule }}" = "12 3 * * *" ]; then
             RATE_ARGS="--refresh-rates"
           fi
           python build_pages_data.py --base-dir . --output-dir docs/data --force-refresh $RATE_ARGS

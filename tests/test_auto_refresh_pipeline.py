@@ -177,7 +177,9 @@ class AutoRefreshPipelineTests(unittest.TestCase):
             "withCacheBust",
             "STALE_AFTER_MS",
             "Últim canvi de preu",
+            "Última consulta font",
             "Última execució",
+            "més de 60 min",
         ]:
             self.assertIn(token, app_js)
 
