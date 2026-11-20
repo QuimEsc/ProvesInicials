@@ -18,3 +18,15 @@ La identitat i l'etiqueta v2 tenen el seu propi SHA i hora efectiva. La prova
 nova utilitza només dates i preus històrics2020 dins d'un directori temporal,
 mai dades futures inexistents. S'hereta la mateixa captura inicialv1 perquè
 els estats de model no han canviat; la cadena nova usa identitatv2.
+
+## v3 · 20/11/2026
+
+Es conserva v2 a `freeze/archive/v2/`. Canvi tècnic exclusiu d'actualització,
+transport i diagnòstic:
+
+- `.github/workflows/update-pages-data.yml`: fraccionament de `schedule` en blocs de 4 hores (`7,37`), `cancel-in-progress: false`, `fetch-depth: 1`, caché `pip`, metadades d'execució i `git pull --rebase` abans de `push`.
+- `data_manager.py`: registre de telemetria de descàrrega (`get_last_fetch_info`) mantenint intacte el fallback al CSV local en cas d'error.
+- `build_pages_data.py`: salvaguarda post-tancament de mercat (`_needs_post_close_refresh`) perquè les execucions retardades capturen el tancament oficial diari fora de la finestra `07:00–23:00`, refresc automàtic diari de tipus BCE/FED si fa >18 h, i metadades diagnòstiques (`diagnostics`, `quote_date`, `data_updated_at`, `last_checked_at`, `refresh_status`).
+- `docs/app.js`: sondeig periòdic automàtic cada 60 s (`visibilitychange` / `focus` + `setInterval`), cache-busting amb `generated_at`, control de concurrència/fora d'ordre, preservació de ticker, timeframe, toggles i zoom, i visualització de les marques temporals d'execució, generació, publicació, comprovació i cotització real.
+
+Impacte: **cap canvi en fórmules, paràmetres, senyals, pesos, costos, models financers ni sessions prospectives arxivades**.

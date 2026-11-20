@@ -35,6 +35,15 @@
     mainZoneOverlay: document.getElementById('mainZoneOverlay'),
   };
 
+  const AUTO_REFRESH_CHECK_MS = 60 * 1000;
+  const MIN_VISIBILITY_CHECK_MS = 20 * 1000;
+  const TOGGLE_STORAGE_KEYS = {
+    blueZones: 'dashboard-toggle-blue-zones',
+    redZones: 'dashboard-toggle-red-zones',
+    buyLines: 'dashboard-toggle-buy-lines',
+    sellLines: 'dashboard-toggle-sell-lines',
+  };
+
   const state = {
     manifest: null,
     summary: null,
@@ -43,9 +52,16 @@
     // The frozen observation protocol always opens on the ordinary391*.
     rebalanceStrategy: 'secondpass_391',
     officialMemory: localStorage.getItem('dashboard-official-memory') || 'friday',
+    timeframe: localStorage.getItem('dashboard-timeframe') === 'W' ? 'W' : 'D',
     tickerData: null,
     vixData: null,
     activeSlug: null,
+    publishedAt: null,
+    lastCheckedAt: null,
+    lastRefreshError: null,
+    refreshInFlight: null,
+    autoRefreshTimerId: null,
+    tickerRequestSeq: 0,
     syncingRange: false,
     zoneRedrawQueued: false,
   };
@@ -53,9 +69,11 @@
   const BUY_LINE_KEYS = ['c1', 'c2', 'c3', 'c4'];
   const SELL_LINE_KEYS = ['v1', 'v2', 'v3', 'v4'];
 
+  restoreUserPreferences();
   const charts = createCharts();
   attachEvents();
   loadInitialData();
+  startAutoRefresh();
 
   function createCharts() {
     const commonOptions = {
@@ -180,15 +198,56 @@
     return { mainChart, ratioChart, vixChart, mainSeries, ratioSeries, vixSeries, lineSeries };
   }
 
+  function restoreUserPreferences() {
+    if (dom.timeframeSelect) {
+      dom.timeframeSelect.value = state.timeframe;
+    }
+    const togglePairs = [
+      [dom.toggleBlueZones, TOGGLE_STORAGE_KEYS.blueZones],
+      [dom.toggleRedZones, TOGGLE_STORAGE_KEYS.redZones],
+      [dom.toggleBuyLines, TOGGLE_STORAGE_KEYS.buyLines],
+      [dom.toggleSellLines, TOGGLE_STORAGE_KEYS.sellLines],
+    ];
+    togglePairs.forEach(([input, storageKey]) => {
+      if (!input) return;
+      const saved = localStorage.getItem(storageKey);
+      if (saved === '0' || saved === 'false') {
+        input.checked = false;
+      } else if (saved === '1' || saved === 'true') {
+        input.checked = true;
+      }
+    });
+  }
+
+  function saveTogglePreference(storageKey, checked) {
+    localStorage.setItem(storageKey, checked ? '1' : '0');
+  }
+
   function attachEvents() {
     dom.tickerSelect.addEventListener('change', async (event) => {
       await setActiveTicker(event.target.value, true);
     });
-    dom.timeframeSelect.addEventListener('change', renderActiveTicker);
-    dom.toggleBlueZones.addEventListener('change', renderActiveTicker);
-    dom.toggleRedZones.addEventListener('change', renderActiveTicker);
-    dom.toggleBuyLines.addEventListener('change', renderActiveTicker);
-    dom.toggleSellLines.addEventListener('change', renderActiveTicker);
+    dom.timeframeSelect.addEventListener('change', () => {
+      state.timeframe = dom.timeframeSelect.value === 'W' ? 'W' : 'D';
+      localStorage.setItem('dashboard-timeframe', state.timeframe);
+      renderActiveTicker({ preserveViewport: false });
+    });
+    dom.toggleBlueZones.addEventListener('change', () => {
+      saveTogglePreference(TOGGLE_STORAGE_KEYS.blueZones, dom.toggleBlueZones.checked);
+      renderActiveTicker({ preserveViewport: true });
+    });
+    dom.toggleRedZones.addEventListener('change', () => {
+      saveTogglePreference(TOGGLE_STORAGE_KEYS.redZones, dom.toggleRedZones.checked);
+      renderActiveTicker({ preserveViewport: true });
+    });
+    dom.toggleBuyLines.addEventListener('change', () => {
+      saveTogglePreference(TOGGLE_STORAGE_KEYS.buyLines, dom.toggleBuyLines.checked);
+      renderActiveTicker({ preserveViewport: true });
+    });
+    dom.toggleSellLines.addEventListener('change', () => {
+      saveTogglePreference(TOGGLE_STORAGE_KEYS.sellLines, dom.toggleSellLines.checked);
+      renderActiveTicker({ preserveViewport: true });
+    });
     dom.resetZoomBtn.addEventListener('click', () => {
       fitAllCharts();
       queueZoneRedraw();
@@ -203,16 +262,47 @@
       localStorage.setItem('dashboard-rebalance-strategy', state.rebalanceStrategy);
       renderRebalanceTable();
     });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        maybeCheckForUpdates('visibility');
+      }
+    });
+    window.addEventListener('focus', () => {
+      maybeCheckForUpdates('focus');
+    });
+  }
+
+  function startAutoRefresh() {
+    if (state.autoRefreshTimerId !== null) {
+      clearInterval(state.autoRefreshTimerId);
+    }
+    state.autoRefreshTimerId = setInterval(() => {
+      checkForUpdates('interval');
+    }, AUTO_REFRESH_CHECK_MS);
+  }
+
+  function maybeCheckForUpdates(reason) {
+    if (!state.manifest) return;
+    const lastMs = state.lastCheckedAt ? Date.parse(state.lastCheckedAt) : 0;
+    if (Number.isFinite(lastMs) && (Date.now() - lastMs) < MIN_VISIBILITY_CHECK_MS) {
+      return;
+    }
+    checkForUpdates(reason);
   }
 
   async function loadInitialData() {
     try {
       setStatus('Carregant manifest i resum...');
-      const [manifest, summary, rebalance, macro] = await Promise.all([
-        fetchJson('./data/manifest.json'),
-        fetchJson('./data/summary.json'),
-        fetchOptionalJson('./data/rebalance.json'),
-        fetchOptionalJson('./data/macro.json'),
+      const initialBust = Date.now();
+      const manifest = await fetchJson('./data/manifest.json', { bustKey: initialBust, captureHeaders: true });
+      state.lastCheckedAt = new Date().toISOString();
+      state.lastRefreshError = null;
+
+      const dataBust = manifest?.generated_at || initialBust;
+      const [summary, rebalance, macro] = await Promise.all([
+        fetchJson('./data/summary.json', { bustKey: dataBust }),
+        fetchOptionalJson('./data/rebalance.json', { bustKey: dataBust }),
+        fetchOptionalJson('./data/macro.json', { bustKey: dataBust }),
       ]);
       state.manifest = manifest;
       state.summary = summary;
@@ -222,7 +312,7 @@
       renderSummaryTable();
       renderMacroPanel();
       renderRebalanceTable();
-      await loadVixData();
+      await loadVixData(dataBust);
 
       const slugFromUrl = new URLSearchParams(window.location.search).get('ticker');
       const storedSlug = localStorage.getItem('dashboard-active-slug');
@@ -235,19 +325,91 @@
         return;
       }
 
-      await setActiveTicker(initialSlug, false);
+      await setActiveTicker(initialSlug, false, { preserveViewport: false, bustKey: dataBust });
     } catch (error) {
       console.error(error);
       showError(`No s'han pogut carregar les dades inicials: ${error.message}`);
     }
   }
 
-  async function loadVixData() {
+  async function checkForUpdates(reason = 'interval') {
+    if (state.refreshInFlight) {
+      return state.refreshInFlight;
+    }
+
+    const task = (async () => {
+      try {
+        const probeBust = Date.now();
+        const nextManifest = await fetchJson('./data/manifest.json', { bustKey: probeBust, captureHeaders: true });
+        state.lastCheckedAt = new Date().toISOString();
+        state.lastRefreshError = null;
+
+        const prevGen = state.manifest?.generated_at || null;
+        const nextGen = nextManifest?.generated_at || null;
+        const prevExec = state.manifest?.diagnostics?.executed_at || null;
+        const nextExec = nextManifest?.diagnostics?.executed_at || null;
+        const hasNewData = !state.manifest || nextGen !== prevGen || nextExec !== prevExec || !state.tickerData;
+
+        if (!hasNewData) {
+          state.manifest = nextManifest;
+          updateStatusDiagnostic();
+          return false;
+        }
+
+        const dataBust = nextGen || probeBust;
+        const slugToLoad = [state.activeSlug, nextManifest?.tickers?.[0]?.slug]
+          .find((slug) => slug && nextManifest?.tickers?.some((item) => item.slug === slug)) || null;
+
+        const vixItem = nextManifest?.tickers?.find((item) => item.ticker === '^VIX' || item.name?.toUpperCase() === 'VIX');
+        const [nextSummary, nextRebalance, nextMacro, nextVix, nextTickerData] = await Promise.all([
+          fetchJson('./data/summary.json', { bustKey: dataBust }),
+          fetchOptionalJson('./data/rebalance.json', { bustKey: dataBust }),
+          fetchOptionalJson('./data/macro.json', { bustKey: dataBust }),
+          vixItem?.slug ? fetchOptionalJson(`./data/tickers/${vixItem.slug}.json`, { bustKey: dataBust }) : Promise.resolve(null),
+          slugToLoad ? fetchJson(`./data/tickers/${slugToLoad}.json`, { bustKey: dataBust }) : Promise.resolve(null),
+        ]);
+
+        state.manifest = nextManifest;
+        state.summary = nextSummary;
+        if (nextRebalance) state.rebalance = nextRebalance;
+        if (nextMacro) state.macro = nextMacro;
+        if (nextVix) state.vixData = nextVix;
+
+        populateTickerSelect();
+        if (slugToLoad) {
+          state.activeSlug = slugToLoad;
+          dom.tickerSelect.value = slugToLoad;
+        }
+        if (nextTickerData) {
+          state.tickerData = nextTickerData;
+        }
+
+        renderSummaryTable();
+        renderMacroPanel();
+        renderRebalanceTable();
+        renderActiveTicker({ preserveViewport: true });
+        return true;
+      } catch (error) {
+        console.warn(`Error en auto-refresc (${reason}):`, error);
+        state.lastCheckedAt = new Date().toISOString();
+        state.lastRefreshError = error?.message || 'Error de connexió';
+        updateStatusDiagnostic();
+        return false;
+      } finally {
+        state.refreshInFlight = null;
+      }
+    })();
+
+    state.refreshInFlight = task;
+    return task;
+  }
+
+  async function loadVixData(bustKey) {
     const vixItem = state.manifest?.tickers?.find((item) => item.ticker === '^VIX' || item.name?.toUpperCase() === 'VIX');
     if (!vixItem?.slug) return;
 
     try {
-      state.vixData = await fetchJson(`./data/tickers/${vixItem.slug}.json`);
+      state.vixData = await fetchJson(`./data/tickers/${vixItem.slug}.json`, { bustKey });
     } catch (error) {
       console.warn('No s\'ha pogut carregar el VIX', error);
       state.vixData = null;
@@ -260,6 +422,7 @@
 
   function populateTickerSelect() {
     const items = state.manifest?.tickers || [];
+    const currentSlug = state.activeSlug;
     dom.tickerSelect.innerHTML = '';
     items.forEach((item) => {
       const option = document.createElement('option');
@@ -267,10 +430,17 @@
       option.textContent = `${item.name} (${item.ticker})`;
       dom.tickerSelect.appendChild(option);
     });
+    if (currentSlug && hasTicker(currentSlug)) {
+      dom.tickerSelect.value = currentSlug;
+    }
   }
 
-  async function setActiveTicker(slug, updateUrl) {
+  async function setActiveTicker(slug, updateUrl, options = {}) {
     if (!hasTicker(slug)) return;
+    const preserveViewport = Boolean(options.preserveViewport);
+    const bustKey = options.bustKey ?? state.manifest?.generated_at ?? Date.now();
+    const requestSeq = ++state.tickerRequestSeq;
+
     state.activeSlug = slug;
     dom.tickerSelect.value = slug;
     localStorage.setItem('dashboard-active-slug', slug);
@@ -281,14 +451,63 @@
     }
 
     setStatus('Carregant actiu seleccionat...');
-    state.tickerData = await fetchJson(`./data/tickers/${slug}.json`);
-    renderActiveTicker();
-    renderSummaryTable();
+    try {
+      const nextTickerData = await fetchJson(`./data/tickers/${slug}.json`, { bustKey });
+      if (requestSeq !== state.tickerRequestSeq) {
+        return;
+      }
+      state.tickerData = nextTickerData;
+      state.lastRefreshError = null;
+      renderActiveTicker({ preserveViewport });
+      renderSummaryTable();
+    } catch (error) {
+      if (requestSeq !== state.tickerRequestSeq) {
+        return;
+      }
+      console.error(error);
+      state.lastRefreshError = error?.message || 'Error carregant actiu';
+      if (state.tickerData) {
+        updateStatusDiagnostic();
+      } else {
+        showError(`No s'ha pogut carregar ${slug}: ${error.message}`);
+      }
+    }
   }
 
-  function renderActiveTicker() {
+  function captureViewportRanges() {
+    try {
+      const mainRange = charts.mainChart.timeScale().getVisibleRange?.();
+      if (mainRange?.from !== undefined && mainRange?.to !== undefined) {
+        return mainRange;
+      }
+    } catch (error) {
+      console.debug('No s ha pogut capturar el rang visible', error);
+    }
+    return null;
+  }
+
+  function restoreViewportRanges(range) {
+    if (!range || range.from === undefined || range.to === undefined) return false;
+    try {
+      state.syncingRange = true;
+      [charts.mainChart, charts.ratioChart, charts.vixChart].forEach((chart) => {
+        chart.timeScale().setVisibleRange(range);
+      });
+      state.syncingRange = false;
+      return true;
+    } catch (error) {
+      state.syncingRange = false;
+      console.debug('No s ha pogut restaurar el rang visible', error);
+      return false;
+    }
+  }
+
+  function renderActiveTicker(options = {}) {
     const data = state.tickerData;
     if (!data) return;
+
+    const preserveViewport = Boolean(options.preserveViewport);
+    const savedRange = preserveViewport ? captureViewportRanges() : null;
 
     const timeframe = dom.timeframeSelect.value || 'D';
     const isDaily = timeframe === 'D';
@@ -311,7 +530,9 @@
       charts.lineSeries[key].setData(showSell ? (data.daily?.lines?.[key] || []) : []);
     });
 
-    fitAllCharts();
+    if (!preserveViewport || !restoreViewportRanges(savedRange)) {
+      fitAllCharts();
+    }
 
     const meta = data.meta || {};
     const summary = data.summary || {};
@@ -319,6 +540,7 @@
 
     dom.metricName.textContent = tickerLabel;
     dom.metricClose.textContent = formatNumber(summary.close);
+    dom.metricClose.title = summary.quote_date ? `Data real cotització: ${formatDateOnly(summary.quote_date)}` : '';
     dom.metricBuyLine.textContent = summary.line ? `${summary.line} · ${formatNumber(summary.buy)}` : '-';
     dom.metricPct.textContent = formatPct(summary.pct);
     dom.metricPct.classList.toggle('positive', Number(summary.pct) >= 0);
@@ -329,13 +551,71 @@
     dom.vixChartSubtitle.textContent = state.vixData?.meta?.ticker ? `${state.vixData.meta.name} (${state.vixData.meta.ticker})` : 'Volatilitat';
     dom.timeframeBadge.textContent = tfLabel;
 
-    const updatedAt = state.manifest?.generated_at || meta.generated_at;
-    const updatedText = updatedAt ? `Actualitzat: ${formatDateTime(updatedAt)}` : 'Actualitzat: -';
-    const cadenceText = meta.refresh_interval_minutes ? ` · refresc cada ${meta.refresh_interval_minutes} min` : '';
-    setStatus(`${tickerLabel} · ${updatedText}${cadenceText}`);
-    dom.summaryUpdatedBadge.textContent = updatedText;
-
+    updateStatusDiagnostic();
     queueZoneRedraw();
+  }
+
+  function updateStatusDiagnostic() {
+    const data = state.tickerData;
+    const meta = data?.meta || {};
+    const manifestEntry = (state.manifest?.tickers || []).find((item) => item.slug === state.activeSlug) || {};
+    const diag = state.manifest?.diagnostics || {};
+    const tickerLabel = meta.name ? `${meta.name} (${meta.ticker || '-'})` : (state.activeSlug || 'Dashboard');
+
+    const executedAt = diag.executed_at || state.manifest?.generated_at || null;
+    const generatedAt = state.manifest?.generated_at || diag.generated_at || meta.generated_at || null;
+    const publishedAt = state.publishedAt || null;
+    const checkedAt = state.lastCheckedAt || null;
+    const quoteDate = manifestEntry.quote_date || data?.summary?.quote_date || meta.quote_date || getLastCandleDate(data);
+    const dataUpdatedAt = manifestEntry.data_updated_at || generatedAt;
+    const refreshStatus = manifestEntry.refresh_status || null;
+
+    const quoteAgeText = dataUpdatedAt ? formatRelativeAge(dataUpdatedAt) : '';
+    const quoteAgeSuffix = quoteAgeText ? ` (${quoteAgeText})` : '';
+    const statusReason = refreshStatus === 'unchanged'
+      ? 'sense canvis de preu'
+      : refreshStatus === 'cached_outside_window'
+        ? 'mercat tancat · conservada última dada'
+        : refreshStatus === 'fallback_error'
+          ? 'error font · conservada última dada'
+          : refreshStatus === 'updated'
+            ? 'nou preu'
+            : '';
+
+    const parts = [
+      tickerLabel,
+      `Cotització: ${quoteDate ? formatDateOnly(quoteDate) : '-'}${quoteAgeSuffix}${statusReason ? ` [${statusReason}]` : ''}`,
+      `Exec: ${formatShortTime(executedAt)}`,
+      `Gen: ${formatShortTime(generatedAt)}`,
+      `Publ: ${formatShortTime(publishedAt)}`,
+      `Comprovat: ${formatShortTime(checkedAt)}`,
+    ];
+    if (state.lastRefreshError) {
+      parts.push(`Avís xarxa: ${state.lastRefreshError} (es conserven dades vàlides)`);
+    }
+
+    setStatus(parts.join(' · '));
+    dom.statusText.title = [
+      `Actiu: ${tickerLabel}`,
+      `Data real cotització: ${quoteDate ? formatDateOnly(quoteDate) : '-'}`,
+      `Últim canvi de cotització detectat: ${dataUpdatedAt ? formatDateTime(dataUpdatedAt) : '-'}`,
+      `Última execució workflow: ${executedAt ? formatDateTime(executedAt) : '-'}${diag.run_number ? ` (#${diag.run_number})` : ''}`,
+      `Última generació JSON: ${generatedAt ? formatDateTime(generatedAt) : '-'}`,
+      `Última publicació Pages (Last-Modified): ${publishedAt ? formatDateTime(publishedAt) : '-'}`,
+      `Última comprovació navegador: ${checkedAt ? formatDateTime(checkedAt) : '-'}`,
+      `Estat refresc: ${refreshStatus || '-'}`,
+    ].join('\n');
+
+    const badgeTime = dataUpdatedAt || generatedAt;
+    const badgeQuote = quoteDate ? `Cot. ${formatDateOnly(quoteDate)} · ` : '';
+    dom.summaryUpdatedBadge.textContent = badgeTime ? `${badgeQuote}Gen. ${formatDateTime(badgeTime)}` : 'Actualitzat: -';
+    dom.summaryUpdatedBadge.title = dom.statusText.title;
+  }
+
+  function getLastCandleDate(data) {
+    const candles = data?.daily?.candles || [];
+    if (!candles.length) return null;
+    return candles[candles.length - 1]?.time || null;
   }
 
   function renderSummaryTable() {
@@ -347,6 +627,14 @@
       const tr = document.createElement('tr');
       if (row.slug === state.activeSlug) {
         tr.classList.add('is-active');
+      }
+      const rowMeta = [
+        row.quote_date ? `Cotització: ${formatDateOnly(row.quote_date)}` : null,
+        row.data_updated_at ? `Actualitzat: ${formatDateTime(row.data_updated_at)}` : null,
+        row.refresh_status ? `Estat: ${row.refresh_status}` : null,
+      ].filter(Boolean).join(' · ');
+      if (rowMeta) {
+        tr.title = rowMeta;
       }
       tr.innerHTML = `
         <td>${escapeHtml(row.name || '-')}</td>
@@ -666,17 +954,35 @@
       }));
   }
 
-  async function fetchJson(url) {
-    const response = await fetch(url, { cache: 'no-store' });
+  function withCacheBust(url, bustKey) {
+    if (bustKey === undefined || bustKey === null || bustKey === '') {
+      return url;
+    }
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}v=${encodeURIComponent(String(bustKey))}`;
+  }
+
+  async function fetchJson(url, options = {}) {
+    const targetUrl = withCacheBust(url, options.bustKey);
+    const response = await fetch(targetUrl, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText} en ${url}`);
+    }
+    if (options.captureHeaders) {
+      const lastModified = response.headers.get('last-modified');
+      if (lastModified) {
+        const parsed = new Date(lastModified);
+        if (!Number.isNaN(parsed.getTime())) {
+          state.publishedAt = parsed.toISOString();
+        }
+      }
     }
     return response.json();
   }
 
-  async function fetchOptionalJson(url) {
+  async function fetchOptionalJson(url, options = {}) {
     try {
-      return await fetchJson(url);
+      return await fetchJson(url, options);
     } catch (error) {
       console.warn(`No s'ha pogut carregar ${url}`, error);
       return null;
@@ -774,6 +1080,46 @@
       hour: '2-digit',
       minute: '2-digit',
     }).format(date);
+  }
+
+  function formatShortTime(value) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat('ca-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  }
+
+  function formatDateOnly(value) {
+    if (!value) return '-';
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      return `${match[3]}/${match[2]}/${match[1]}`;
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat('ca-ES', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  }
+
+  function formatRelativeAge(value) {
+    if (!value) return '';
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms)) return '';
+    const diffMin = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (diffMin < 1) return 'fa <1 min';
+    if (diffMin < 60) return `fa ${diffMin} min`;
+    const hours = Math.floor(diffMin / 60);
+    const mins = diffMin % 60;
+    if (hours < 24) return mins ? `fa ${hours} h ${mins} min` : `fa ${hours} h`;
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return remHours ? `fa ${days} d ${remHours} h` : `fa ${days} d`;
   }
 
   function clamp(value, min, max) {

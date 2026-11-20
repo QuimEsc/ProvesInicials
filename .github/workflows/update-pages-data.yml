@@ -3,7 +3,12 @@ name: Update dashboard data
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "7,37 0-3 * * *"
+    - cron: "7,37 4-7 * * *"
+    - cron: "7,37 8-11 * * *"
+    - cron: "7,37 12-15 * * *"
+    - cron: "7,37 16-19 * * *"
+    - cron: "7,37 20-23 * * *"
     - cron: "12 3 * * *"
   push:
     branches:
@@ -30,7 +35,7 @@ permissions:
 
 concurrency:
   group: update-dashboard-data
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-data:
@@ -48,23 +53,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Create data folder if missing
         run: mkdir -p dades_historiques
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Build static JSON data
+        env:
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
+          export WORKFLOW_EXECUTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           RATE_ARGS=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "12 3 * * *" ]; then
             RATE_ARGS="--refresh-rates"
@@ -85,5 +93,6 @@ jobs:
             echo "No hi ha canvis per a fer commit"
           else
             git commit -m "chore: update dashboard data and historical csv"
+            git pull --rebase origin main
             git push
           fi

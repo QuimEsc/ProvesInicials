@@ -81,6 +81,11 @@ ENABLE_LOGS = str(os.environ.get("ENABLE_DATA_MANAGER_LOGS", "1")).strip().lower
 os.makedirs(CARPETA_DADES, exist_ok=True)
 
 _CACHE_MEMORIA: Dict[str, Tuple[pd.DataFrame, pd.Timestamp]] = {}
+_LAST_FETCH_INFO: Dict[str, dict] = {}
+
+
+def get_last_fetch_info(ticker: str) -> dict:
+    return dict(_LAST_FETCH_INFO.get(_normalize_ticker(ticker), {}))
 
 # Nou: throttle global simple per a les peticions HTTP
 _REQUEST_LOCK = threading.Lock()
@@ -819,7 +824,6 @@ def get_fed_rate(force_refresh: bool = False, *, allow_stale: bool = False) -> p
 
 def get_data(ticker: str, force_refresh: bool = False, *, allow_stale: bool = False) -> pd.DataFrame:
     ticker = _normalize_ticker(ticker)
-    now = _utc_now_naive()
 
     if not ticker:
         raise ValueError("Ticker buit o invàlid.")
@@ -828,15 +832,32 @@ def get_data(ticker: str, force_refresh: bool = False, *, allow_stale: bool = Fa
         cached_df, cached_at = _CACHE_MEMORIA[ticker]
         if _is_timestamp_fresh(cached_at):
             _log(f"{ticker}: retornant dades des de memòria cau")
+            _LAST_FETCH_INFO[ticker] = {
+                "ticker": ticker,
+                "status": "cached_fresh",
+                "attempted_refresh": False,
+                "candle_changed": False,
+                "checked_at": None,
+                "last_candle_date": cached_df.index.max().strftime("%Y-%m-%d") if not cached_df.empty else None,
+                "error": None,
+            }
             return cached_df.copy()
 
     path = _csv_path(ticker)
+    attempted_refresh = False
+    candle_changed = False
+    checked_at = None
+    status = "cached_fresh"
+    error_msg = None
 
     if os.path.exists(path):
         df_local = _read_local_csv(path)
         file_ts = _file_timestamp_utc(path)
+        old_last_sig = _last_candle_signature(df_local)
+        old_len = len(df_local)
 
         if force_refresh or df_local.empty or ((not allow_stale) and not _is_timestamp_fresh(file_ts)):
+            attempted_refresh = True
             if force_refresh:
                 _log(f"{ticker}: force_refresh=True, refrescant dades")
             elif df_local.empty:
@@ -846,25 +867,46 @@ def get_data(ticker: str, force_refresh: bool = False, *, allow_stale: bool = Fa
 
             try:
                 df = _refresh_recent_window(ticker, df_local)
+                checked_at = _utc_now_naive().isoformat(timespec="seconds") + "Z"
+                new_last_sig = _last_candle_signature(df)
+                candle_changed = (old_last_sig != new_last_sig) or (len(df) != old_len)
+                status = "updated" if candle_changed else "unchanged"
                 _save_local_csv(path, df)
             except Exception as exc:
+                error_msg = str(exc)
                 if not df_local.empty:
                     _log(
                         f"{ticker}: error refrescant dades ({exc}). "
                         f"Es manté temporalment el CSV local."
                     )
                     df = df_local
+                    status = "fallback_error"
                 else:
+                    _LAST_FETCH_INFO[ticker] = {
+                        "ticker": ticker,
+                        "status": "error",
+                        "attempted_refresh": True,
+                        "candle_changed": False,
+                        "checked_at": None,
+                        "last_candle_date": None,
+                        "error": error_msg,
+                    }
                     raise
         else:
             if allow_stale and not _is_timestamp_fresh(file_ts):
                 _log(f"{ticker}: usant CSV local fora de finestra de refresc")
+                status = "cached_outside_window"
             else:
                 _log(f"{ticker}: usant CSV local recent sense refrescar")
+                status = "cached_fresh"
             df = df_local
     else:
+        attempted_refresh = True
         _log(f"{ticker}: no existeix CSV local, fent descàrrega inicial")
         df = _download_full_and_recent(ticker)
+        checked_at = _utc_now_naive().isoformat(timespec="seconds") + "Z"
+        candle_changed = not df.empty
+        status = "updated"
         _save_local_csv(path, df)
 
     if df.empty:
@@ -883,5 +925,14 @@ def get_data(ticker: str, force_refresh: bool = False, *, allow_stale: bool = Fa
     )
     out.index.name = "Date"
 
+    _LAST_FETCH_INFO[ticker] = {
+        "ticker": ticker,
+        "status": status,
+        "attempted_refresh": attempted_refresh,
+        "candle_changed": candle_changed,
+        "checked_at": checked_at,
+        "last_candle_date": out.index.max().strftime("%Y-%m-%d") if not out.empty else None,
+        "error": error_msg,
+    }
     _CACHE_MEMORIA[ticker] = (out.copy(), _utc_now_naive())
     return out.copy()

@@ -1,5 +1,5 @@
 {
-  "version": "391-freeze-2026-11-08-v2",
+  "version": "391-freeze-2026-11-08-v3",
   "rules_commit": "3723b933780691f9c54bb6723f44da454ba38af3",
   "rules_committed_at": "2026-11-08T20:51:46+01:00",
   "frozen_at": "2026-11-08T20:52:13+01:00",
@@ -8,10 +8,10 @@
   "first_admissible_session": "2026-11-09",
   "planned_last_session": "2027-11-05",
   "review_date": "2027-11-08",
-  "manifest_sha256": "718ae469f0fb53fde7c6dafe87c6c42ba622626b6b21aa0dd273412de9bd8664",
+  "manifest_sha256": "eda364752d7f7d4bc18f143d4d89068e52b6a105f6a4a6af9552d977765a2310",
   "modern_backtest_cutoff": "2026-11-05",
   "proxy_cutoff": "2026-09-30",
   "performance_basis": "PR_USD production feed; audited TR remains a separate retrospective universe",
   "previous_rules_commit": "5dab23ad31ff33fa2a760b247c19ae627c87ab4f",
-  "technical_change": "late information execution guard only; no model parameter change"
+  "technical_change": "auto-refresh frontend polling, post-close market refresh guard, workflow queue resilience, and diagnostic timestamps only; no model or financial parameter change"
 }

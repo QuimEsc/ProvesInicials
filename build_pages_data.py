@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pandas as pd
 
-from data_manager import REFRESH_INTERVAL_MINUTES, get_data, get_ecb_deposit_rate, get_fed_rate
+from data_manager import REFRESH_INTERVAL_MINUTES, get_data, get_ecb_deposit_rate, get_fed_rate, get_last_fetch_info
 import logic_blue
 import logic_lines
 import logic_ratio
@@ -88,6 +90,72 @@ def _is_refresh_allowed(refresh_group: str, now_local: pd.Timestamp) -> bool:
     if now_local.weekday() >= 5:
         return False
     return MARKET_REFRESH_START_HOUR <= int(now_local.hour) < MARKET_REFRESH_END_HOUR
+
+
+def _parse_utc_timestamp(value: str | None) -> pd.Timestamp | None:
+    if not value:
+        return None
+    ts = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return ts.tz_localize(None)
+
+
+def _latest_market_close_utc(now_utc_naive: pd.Timestamp) -> pd.Timestamp:
+    now_ny = now_utc_naive.tz_localize("UTC").tz_convert("America/New_York")
+    close_today_ny = now_ny.normalize() + pd.Timedelta(hours=16, minutes=20)
+    if now_ny.weekday() < 5 and now_ny >= close_today_ny:
+        target_ny = close_today_ny
+    else:
+        cursor = now_ny.normalize() - pd.Timedelta(days=1)
+        while cursor.weekday() >= 5:
+            cursor -= pd.Timedelta(days=1)
+        target_ny = cursor + pd.Timedelta(hours=16, minutes=20)
+    return target_ny.tz_convert("UTC").tz_localize(None)
+
+
+def _needs_post_close_refresh(
+    refresh_group: str,
+    prev_ticker_entry: dict | None,
+    prev_manifest_generated_at: str | None,
+    now_utc_naive: pd.Timestamp,
+) -> bool:
+    if _normalize_refresh_group(refresh_group) == REFRESH_GROUP_24H:
+        return False
+    last_checked_raw = None
+    if isinstance(prev_ticker_entry, dict):
+        last_checked_raw = (
+            prev_ticker_entry.get("last_checked_at")
+            or prev_ticker_entry.get("data_updated_at")
+        )
+    last_checked = _parse_utc_timestamp(last_checked_raw or prev_manifest_generated_at)
+    if last_checked is None:
+        return True
+    return last_checked < _latest_market_close_utc(now_utc_naive)
+
+
+def _load_previous_manifest(output_dir: Path) -> dict:
+    manifest_path = output_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _safe_git_short_head(base_dir: Path) -> str | None:
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=base_dir,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return out or None
+    except Exception:
+        return None
 
 
 def _slugify(value: str) -> str:
@@ -325,12 +393,31 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
     now = pd.Timestamp.utcnow().tz_localize(None)
     generated_at = now.isoformat(timespec="seconds") + "Z"
     now_local = _local_refresh_time(now)
+    prev_manifest = _load_previous_manifest(output_dir)
+    prev_generated_at = prev_manifest.get("generated_at")
+    prev_by_slug = {
+        str(item.get("slug")): item
+        for item in (prev_manifest.get("tickers") or [])
+        if isinstance(item, dict) and item.get("slug")
+    }
+    prev_by_ticker = {
+        str(item.get("ticker")).strip().upper(): item
+        for item in (prev_manifest.get("tickers") or [])
+        if isinstance(item, dict) and item.get("ticker")
+    }
     refresh_groups_by_ticker = {
         str(row["Ticker"]).strip().upper(): _normalize_refresh_group(row.get("RefreshGroup"))
         for row in df_tickers.to_dict(orient="records")
     }
     denominator_refresh_group = refresh_groups_by_ticker.get(DENOMINADOR.upper(), REFRESH_GROUP_DEFAULT)
-    denominator_refresh_allowed = _is_refresh_allowed(denominator_refresh_group, now_local)
+    denominator_window_open = _is_refresh_allowed(denominator_refresh_group, now_local)
+    denominator_post_close = _needs_post_close_refresh(
+        denominator_refresh_group,
+        prev_by_ticker.get(DENOMINADOR.upper()),
+        prev_generated_at,
+        now,
+    )
+    denominator_refresh_allowed = denominator_window_open or denominator_post_close
     df_denominator_daily = None
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -341,13 +428,20 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
     summary_rows: list[dict] = []
     generated_ticker_files: set[str] = set()
     price_data_by_ticker: dict[str, pd.DataFrame] = {}
+    any_post_close_refresh = False
+    status_counts = {"updated": 0, "unchanged": 0, "cached": 0, "error": 0}
 
     for row in df_tickers.to_dict(orient="records"):
         nom = str(row["Nom"]).strip()
         ticker = str(row["Ticker"]).strip()
         refresh_group = _normalize_refresh_group(row.get("RefreshGroup"))
-        refresh_allowed = _is_refresh_allowed(refresh_group, now_local)
         slug = _slugify(nom)
+        prev_entry = prev_by_slug.get(slug) or prev_by_ticker.get(ticker.upper())
+        window_open = _is_refresh_allowed(refresh_group, now_local)
+        post_close_due = _needs_post_close_refresh(refresh_group, prev_entry, prev_generated_at, now)
+        if post_close_due:
+            any_post_close_refresh = True
+        refresh_allowed = window_open or post_close_due
         data_kwargs = {
             "force_refresh": force_refresh and refresh_allowed,
             "allow_stale": not refresh_allowed,
@@ -355,10 +449,11 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
 
         print(
             f"Generant {nom} ({ticker})... "
-            f"refresh_group={refresh_group}, refresh_allowed={refresh_allowed}"
+            f"refresh_group={refresh_group}, refresh_allowed={refresh_allowed}, post_close={post_close_due}"
         )
 
         df_main_daily = get_data(ticker, **data_kwargs)
+        fetch_info = get_last_fetch_info(ticker)
         price_data_by_ticker[ticker.upper()] = df_main_daily
         df_main_weekly = _resample_ohlc(df_main_daily, WEEKLY_RULE)
 
@@ -395,6 +490,40 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
             ratio_weekly = _flat_ratio_from_main(df_main_weekly)
 
         close = _last_close(df_main_daily)
+        quote_date = str(candles_daily.iloc[-1]["time"]) if not candles_daily.empty else None
+        prev_summary = prev_entry.get("summary") if isinstance(prev_entry, dict) and isinstance(prev_entry.get("summary"), dict) else {}
+        prev_quote_date = prev_entry.get("quote_date") if isinstance(prev_entry, dict) else None
+        prev_close = prev_summary.get("close")
+        prev_close_matches = (
+            prev_close is not None
+            and close is not None
+            and round(float(prev_close), 6) == round(float(close), 6)
+        )
+        price_changed = (
+            bool(fetch_info.get("candle_changed"))
+            or (prev_entry is None)
+            or (prev_quote_date != quote_date)
+            or (not prev_close_matches)
+        )
+        prev_data_updated_at = (
+            (prev_entry.get("data_updated_at") if isinstance(prev_entry, dict) else None)
+            or prev_generated_at
+        )
+        data_updated_at = generated_at if price_changed or not prev_data_updated_at else prev_data_updated_at
+        last_checked_at = fetch_info.get("checked_at") or (
+            (prev_entry.get("last_checked_at") if isinstance(prev_entry, dict) else None)
+            or prev_data_updated_at
+        )
+        refresh_status = fetch_info.get("status") or ("cached_outside_window" if not refresh_allowed else "unchanged")
+        if refresh_status == "updated":
+            status_counts["updated"] += 1
+        elif refresh_status == "unchanged":
+            status_counts["unchanged"] += 1
+        elif refresh_status in {"fallback_error", "error"}:
+            status_counts["error"] += 1
+        else:
+            status_counts["cached"] += 1
+
         buy_lines = {
             "c1": _last_line_value(lines_raw.get("c1"), "c1"),
             "c2": _last_line_value(lines_raw.get("c2"), "c2"),
@@ -411,6 +540,7 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
                 "denominator": DENOMINADOR,
                 "refresh_group": refresh_group,
                 "refresh_interval_minutes": REFRESH_INTERVAL_MINUTES,
+                "quote_date": quote_date,
             },
             "daily": {
                 "candles": candles_daily,
@@ -439,6 +569,7 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
                 "line": nom_linia,
                 "buy": valor_linia,
                 "pct": pct,
+                "quote_date": quote_date,
             },
         }
 
@@ -452,6 +583,10 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
                 "ticker": ticker,
                 "slug": slug,
                 "refresh_group": refresh_group,
+                "quote_date": quote_date,
+                "data_updated_at": data_updated_at,
+                "last_checked_at": last_checked_at,
+                "refresh_status": refresh_status,
                 "summary": {
                     "close": close,
                     "line": nom_linia,
@@ -469,6 +604,10 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
                 "line": nom_linia,
                 "buy": valor_linia,
                 "pct": pct,
+                "quote_date": quote_date,
+                "data_updated_at": data_updated_at,
+                "last_checked_at": last_checked_at,
+                "refresh_status": refresh_status,
             }
         )
 
@@ -479,8 +618,29 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
         )
     )
 
+    prev_rates_ts = _parse_utc_timestamp((prev_manifest.get("diagnostics") or {}).get("rates_updated_at"))
+    rates_due = refresh_rates or prev_rates_ts is None or ((now - prev_rates_ts) >= pd.Timedelta(hours=18))
+    rates_updated_at = generated_at if rates_due else (prev_manifest.get("diagnostics") or {}).get("rates_updated_at")
+    diagnostics = {
+        "executed_at": os.environ.get("WORKFLOW_EXECUTED_AT") or generated_at,
+        "generated_at": generated_at,
+        "rates_updated_at": rates_updated_at,
+        "source_commit": _safe_git_short_head(base_dir),
+        "run_id": os.environ.get("GITHUB_RUN_ID") or None,
+        "run_number": os.environ.get("GITHUB_RUN_NUMBER") or None,
+        "event_name": os.environ.get("GITHUB_EVENT_NAME") or "local",
+        "schedule": os.environ.get("GITHUB_EVENT_SCHEDULE") or None,
+        "market_window_open": _is_refresh_allowed(REFRESH_GROUP_MARKET, now_local),
+        "post_close_refresh": any_post_close_refresh,
+        "updated_count": status_counts["updated"],
+        "unchanged_count": status_counts["unchanged"],
+        "cached_count": status_counts["cached"],
+        "error_count": status_counts["error"],
+    }
+
     manifest = {
         "generated_at": generated_at,
+        "diagnostics": diagnostics,
         "denominator": DENOMINADOR,
         "refresh_interval_minutes": REFRESH_INTERVAL_MINUTES,
         "refresh_schedule": {
@@ -499,6 +659,7 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
     }
     summary = {
         "generated_at": generated_at,
+        "diagnostics": diagnostics,
         "rows": summary_rows,
     }
 
@@ -510,9 +671,9 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
 
     tracking_inputs = None
     try:
-        print(f"Generant estratègia de cartera... refresh_rates={refresh_rates}")
-        ecb_rate = get_ecb_deposit_rate(force_refresh=refresh_rates, allow_stale=not refresh_rates)
-        fed_rate = get_fed_rate(force_refresh=refresh_rates, allow_stale=not refresh_rates)
+        print(f"Generant estratègia de cartera... refresh_rates={rates_due}")
+        ecb_rate = get_ecb_deposit_rate(force_refresh=rates_due, allow_stale=not rates_due)
+        fed_rate = get_fed_rate(force_refresh=rates_due, allow_stale=not rates_due)
         rebalance_payload, rebalance_history = portfolio_rebalance.build_rebalance_data(
             price_data_by_ticker[portfolio_rebalance.MSCI_WORLD_TICKER.upper()],
             price_data_by_ticker[portfolio_rebalance.NASDAQ_TICKER.upper()],
@@ -537,7 +698,14 @@ def build_site(base_dir: Path, output_dir: Path, force_refresh: bool = False, *,
         from prospective_tracking import record_from_inputs
         print("Registre de seguiment:", record_from_inputs(base_dir, *tracking_inputs, generated_at))
     try:
-        macro_refresh_allowed = _is_refresh_allowed(REFRESH_GROUP_MARKET, now_local)
+        macro_window_open = _is_refresh_allowed(REFRESH_GROUP_MARKET, now_local)
+        macro_post_close = _needs_post_close_refresh(
+            REFRESH_GROUP_MARKET,
+            None,
+            prev_generated_at,
+            now,
+        )
+        macro_refresh_allowed = macro_window_open or macro_post_close
         print(
             "Generant context macro 10Y/DXY... "
             f"refresh_allowed={macro_refresh_allowed}"
