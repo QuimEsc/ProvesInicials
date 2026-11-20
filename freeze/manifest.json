@@ -13,12 +13,12 @@
     "logic_ratio.py": "eae836ca2a2b4736d86f0ba72c237e30bc17d67155dbfaac731e540d4c0586d7",
     "logic_red.py": "b75843c82bee0f76d5a71eadb6c4f6d702c1e522d4c52561554354aaf3685e97",
     "docs/index.html": "afba2f00317e3dc00ead0ae76b224880eea6b81872023fd631198c159ad81efd",
-    "docs/app.js": "99b278d91939dcd867509eb881ada62951cd939a76499c0fdc5cfc82a7dd77fa",
+    "docs/app.js": "e77f69b234e05e33ba8e209dc9308b915aca6c6c9d2c32e85e8f65d93302afa0",
     "docs/styles.css": "8434c67034d587aed2df289b1bb6a07225817d0f4a0c4a6c3887eb945e8a72e8",
     "requirements.txt": "15adb088cc892ec448f5e28f6e6c18eb77d5317fb116800b6c7c254a0e602ce9",
     ".github/workflows/update-pages-data.yml": "57288d048575139e94fa1310caa62c84d8ae04073e40f279e4973e170302a63a",
     "freeze/parameters.json": "3c78efac09cf1060f5fe8f69e474f0707c23f67cf6dea98de3b996d6ff4afcfd",
     "freeze/research_sources_sha256.csv": "ac283ea6b980def8d2572c5bf9f8e812fda3648aae4cf9a7e0fd5ec268ce95fa",
-    "freeze/corrections.md": "cca13de4684a832aca9660dedb456c17f2bcfa32c731103af6743f5ca86024db"
+    "freeze/corrections.md": "7fe444ac693a79caf745d797f5a3f14bbb706b724b8840ebfffa7695be73f2e0"
   }
 }

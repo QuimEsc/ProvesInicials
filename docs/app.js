@@ -37,6 +37,8 @@
 
   const AUTO_REFRESH_CHECK_MS = 60 * 1000;
   const MIN_VISIBILITY_CHECK_MS = 20 * 1000;
+  // Heartbeat limit: generated_at is rewritten by every run, even when prices do not change.
+  const STALE_AFTER_MS = 45 * 60 * 1000;
   const TOGGLE_STORAGE_KEYS = {
     blueZones: 'dashboard-toggle-blue-zones',
     redZones: 'dashboard-toggle-red-zones',
@@ -582,18 +584,22 @@
             ? 'nou preu'
             : '';
 
+    const generatedMs = generatedAt ? Date.parse(generatedAt) : NaN;
+    const heartbeatAgeMs = Number.isFinite(generatedMs) ? Date.now() - generatedMs : null;
+    const isStale = heartbeatAgeMs !== null && heartbeatAgeMs > STALE_AFTER_MS;
+    const generatedAge = generatedAt ? formatRelativeAge(generatedAt) : '';
+
     const parts = [
       tickerLabel,
-      `Cotització: ${quoteDate ? formatDateOnly(quoteDate) : '-'}${quoteAgeSuffix}${statusReason ? ` [${statusReason}]` : ''}`,
-      `Exec: ${formatShortTime(executedAt)}`,
-      `Gen: ${formatShortTime(generatedAt)}`,
-      `Publ: ${formatShortTime(publishedAt)}`,
+      `Sessió de cotització: ${quoteDate ? formatDateOnly(quoteDate) : '-'}`,
+      `Últim canvi de preu: ${dataUpdatedAt ? formatDateTime(dataUpdatedAt) : '-'}${quoteAgeSuffix}${statusReason ? ` [${statusReason}]` : ''}`,
+      `Última execució: ${executedAt ? formatDateTime(executedAt) : '-'}${generatedAge ? ` (${generatedAge})` : ''}`,
+      `Publicat: ${publishedAt ? formatDateTime(publishedAt) : '-'}`,
       `Comprovat: ${formatShortTime(checkedAt)}`,
     ];
-    if (state.lastRefreshError) {
-      parts.push(`Avís xarxa: ${state.lastRefreshError} (es conserven dades vàlides)`);
+    if (isStale) {
+      parts.push(`AVÍS: dades generades fa més de 45 min (retard del sistema d'actualització)`);
     }
-
     setStatus(parts.join(' · '));
     dom.statusText.title = [
       `Actiu: ${tickerLabel}`,

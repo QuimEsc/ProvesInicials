@@ -8,7 +8,7 @@
   "first_admissible_session": "2026-11-09",
   "planned_last_session": "2027-11-05",
   "review_date": "2027-11-08",
-  "manifest_sha256": "eda364752d7f7d4bc18f143d4d89068e52b6a105f6a4a6af9552d977765a2310",
+  "manifest_sha256": "47a601809289a1c089db0c498bbf99c3a7e547e658cd9f78a2004103db42c09f",
   "modern_backtest_cutoff": "2026-11-05",
   "proxy_cutoff": "2026-09-30",
   "performance_basis": "PR_USD production feed; audited TR remains a separate retrospective universe",

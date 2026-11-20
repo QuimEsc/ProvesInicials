@@ -1,0 +1,95 @@
+name: Watch dashboard data freshness
+
+# Supervises the heartbeat (generated_at) of docs/data/manifest.json, NOT the
+# quotations: a closed market keeps producing a new heartbeat every run.
+# At >45 min it triggers self-heal (unless update-pages-data.yml is already
+# queued/running). It only raises an alert issue / fails the run if the delay
+# persists beyond 90 min or self-heal cannot run, avoiding false/duplicate alerts.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: watch-dashboard-freshness
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Evaluate heartbeat
+        id: eval
+        run: |
+          set +e
+          python monitor_freshness.py --manifest docs/data/manifest.json --json-out freshness.json
+          CODE=$?
+          set -e
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          AGE=$(python -c "import json; r=json.load(open('freshness.json')); v=r.get('repo_age_min'); print(int(float(v)) if v is not None else 99999)")
+          echo "age_min=$AGE" >> "$GITHUB_OUTPUT"
+
+      - name: Self-heal when stale
+        id: heal
+        if: steps.eval.outputs.code == '2'
+        run: |
+          ACTIVE=$(gh run list --workflow update-pages-data.yml --json status --jq '[.[] | select(.status=="queued" or .status=="in_progress")] | length')
+          echo "active=$ACTIVE" >> "$GITHUB_OUTPUT"
+          if [ "$ACTIVE" = "0" ]; then
+            if gh workflow run update-pages-data.yml --ref main; then
+              echo "dispatched=1" >> "$GITHUB_OUTPUT"
+              echo "Auto-reparació activada: s'ha llançat update-pages-data.yml." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "dispatched=0" >> "$GITHUB_OUTPUT"
+              echo "ERROR: no s'ha pogut llançar update-pages-data.yml." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "dispatched=0" >> "$GITHUB_OUTPUT"
+            echo "Ja hi ha una actualització en cua o en curs ($ACTIVE); no es duplica el dispatch." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Open, update, or close the alert issue (best effort)
+        continue-on-error: true
+        run: |
+          TITLE="Actualització de dades endarrerida (>45 min)"
+          OPEN=$(gh issue list --state open --search "$TITLE in:title" --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -n 1)
+          AGE="${{ steps.eval.outputs.age_min }}"
+          CODE="${{ steps.eval.outputs.code }}"
+          if [ "$CODE" = "2" ] && [ "$AGE" -ge 90 ]; then
+            {
+              echo "Informe del watchdog (retard persistent >= 90 min):"
+              echo ""
+              echo '```json'
+              cat freshness.json
+              echo '```'
+            } > issue_body.md
+            if [ -z "$OPEN" ]; then
+              gh issue create --title "$TITLE" --body-file issue_body.md
+            else
+              # Edit in place instead of commenting every 15 minutes to avoid duplicate email alerts.
+              gh issue edit "$OPEN" --body-file issue_body.md
+            fi
+          elif [ "$CODE" = "0" ] && [ -n "$OPEN" ]; then
+            gh issue close "$OPEN" --comment "Dades de nou al dia."
+          fi
+
+      - name: Fail when persistent or unrecoverable delay
+        if: steps.eval.outputs.code == '2' && (fromJSON(steps.eval.outputs.age_min) >= 90 || (steps.heal.outputs.dispatched != '1' && steps.heal.outputs.active == '0'))
+        run: |
+          echo "Heartbeat stale for ${{ steps.eval.outputs.age_min }} minutes and could not recover automatically." >&2
+          exit 1

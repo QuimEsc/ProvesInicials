@@ -30,3 +30,10 @@ transport i diagnòstic:
 - `docs/app.js`: sondeig periòdic automàtic cada 60 s (`visibilitychange` / `focus` + `setInterval`), cache-busting amb `generated_at`, control de concurrència/fora d'ordre, preservació de ticker, timeframe, toggles i zoom, i visualització de les marques temporals d'execució, generació, publicació, comprovació i cotització real.
 
 Impacte: **cap canvi en fórmules, paràmetres, senyals, pesos, costos, models financers ni sessions prospectives arxivades**.
+
+### v3.1 · 20/11/2026
+
+Supervisió i claredat d'estat, sense cap canvi de models: `docs/app.js` separa
+«Última execució» (batec del sistema) d'«Últim canvi de preu» i avisa si el batec
+supera 45 min. Nous fitxers no congelats: `monitor_freshness.py`,
+`.github/workflows/watch-data-freshness.yml` i `tests/test_monitor_freshness.py`.
