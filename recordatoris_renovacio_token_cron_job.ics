@@ -1,0 +1,121 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//QuimEsc//ProvesInicials Automation//CA
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:Renovació Token GitHub ProvesInicials
+X-WR-TIMEZONE:Europe/Madrid
+BEGIN:VTIMEZONE
+TZID:Europe/Madrid
+X-LIC-LOCATION:Europe/Madrid
+BEGIN:DAYLIGHT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0200
+TZNAME:CEST
+DTSTART:19700329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:+0200
+TZOFFSETTO:+0100
+TZNAME:CET
+DTSTART:19701025T030000
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:provesinicials-cron-job-token-20270204@quimesc.github.io
+DTSTAMP:20261120T235320Z
+DTSTART;TZID=Europe/Madrid:20270204T090000
+DTEND;TZID=Europe/Madrid:20270204T093000
+SUMMARY:Renovar token GitHub — cron-job.org — ProvesInicials
+DESCRIPTION:Primer avís (queden 14 dies)\n\nToken GitHub: cron-job-provesi
+ nicials (Fine-grained PAT)\nData de caducitat: 18/02/2027 a les 22:49:49 U
+ TC (23:49:49 CET\, hora de Madrid).\nPermisos mínims: repositori QuimEsc/
+ ProvesInicials · Actions: Read and write.\n\nEnllaç GitHub per renovar-l
+ o:\nhttps://github.com/settings/personal-access-tokens\n\nEnllaç cron-job
+ .org (tasca: Actualitzar Dashboard Borsa):\nhttps://cron-job.org\n\nInstru
+ ccions completes al repositori (README.md):\nhttps://github.com/QuimEsc/Pr
+ ovesInicials/blob/main/README.md\n\nIMPORTANT: prova amb Test run abans de
+  revocar el token antic i actualitza la nova data de caducitat a README.md
+ .
+URL:https://github.com/settings/personal-access-tokens
+STATUS:CONFIRMED
+TRANSP:TRANSPARENT
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:PT0M
+DESCRIPTION:Primer avís (queden 14 dies) — Renovar token GitHub — cron
+ -job.org — ProvesInicials
+END:VALARM
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:Primer avís (queden 14 dies) — Renovar token GitHub — cron
+ -job.org — ProvesInicials
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:provesinicials-cron-job-token-20270211@quimesc.github.io
+DTSTAMP:20261120T235320Z
+DTSTART;TZID=Europe/Madrid:20270211T090000
+DTEND;TZID=Europe/Madrid:20270211T093000
+SUMMARY:Renovar token GitHub — cron-job.org — ProvesInicials
+DESCRIPTION:Segon avís (queden 7 dies)\n\nToken GitHub: cron-job-provesini
+ cials (Fine-grained PAT)\nData de caducitat: 18/02/2027 a les 22:49:49 UTC
+  (23:49:49 CET\, hora de Madrid).\nPermisos mínims: repositori QuimEsc/Pr
+ ovesInicials · Actions: Read and write.\n\nEnllaç GitHub per renovar-lo:
+ \nhttps://github.com/settings/personal-access-tokens\n\nEnllaç cron-job.o
+ rg (tasca: Actualitzar Dashboard Borsa):\nhttps://cron-job.org\n\nInstrucc
+ ions completes al repositori (README.md):\nhttps://github.com/QuimEsc/Prov
+ esInicials/blob/main/README.md\n\nIMPORTANT: prova amb Test run abans de r
+ evocar el token antic i actualitza la nova data de caducitat a README.md.
+URL:https://github.com/settings/personal-access-tokens
+STATUS:CONFIRMED
+TRANSP:TRANSPARENT
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:PT0M
+DESCRIPTION:Segon avís (queden 7 dies) — Renovar token GitHub — cron-j
+ ob.org — ProvesInicials
+END:VALARM
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:Segon avís (queden 7 dies) — Renovar token GitHub — cron-j
+ ob.org — ProvesInicials
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:provesinicials-cron-job-token-20270217@quimesc.github.io
+DTSTAMP:20261120T235320Z
+DTSTART;TZID=Europe/Madrid:20270217T090000
+DTEND;TZID=Europe/Madrid:20270217T093000
+SUMMARY:Renovar token GitHub — cron-job.org — ProvesInicials
+DESCRIPTION:AVÍS URGENT: el token caduca demà (18/02/2027)\n\nToken GitHu
+ b: cron-job-provesinicials (Fine-grained PAT)\nData de caducitat: 18/02/20
+ 27 a les 22:49:49 UTC (23:49:49 CET\, hora de Madrid).\nPermisos mínims: 
+ repositori QuimEsc/ProvesInicials · Actions: Read and write.\n\nEnllaç G
+ itHub per renovar-lo:\nhttps://github.com/settings/personal-access-tokens\
+ n\nEnllaç cron-job.org (tasca: Actualitzar Dashboard Borsa):\nhttps://cro
+ n-job.org\n\nInstruccions completes al repositori (README.md):\nhttps://gi
+ thub.com/QuimEsc/ProvesInicials/blob/main/README.md\n\nIMPORTANT: prova am
+ b Test run abans de revocar el token antic i actualitza la nova data de ca
+ ducitat a README.md.
+URL:https://github.com/settings/personal-access-tokens
+STATUS:CONFIRMED
+TRANSP:TRANSPARENT
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:PT0M
+DESCRIPTION:AVÍS URGENT: el token caduca demà (18/02/2027) — Renovar to
+ ken GitHub — cron-job.org — ProvesInicials
+END:VALARM
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:AVÍS URGENT: el token caduca demà (18/02/2027) — Renovar to
+ ken GitHub — cron-job.org — ProvesInicials
+END:VALARM
+END:VEVENT
+END:VCALENDAR
