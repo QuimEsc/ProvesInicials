@@ -178,10 +178,34 @@ class FreshnessTests(unittest.TestCase):
                 self.assertEqual(mf.main(["--manifest", str(m_path), "--no-pages", "--json-out", str(out_path)]), 2)
                 self.assertTrue(json.loads(out_path.read_text(encoding="utf-8"))["stale"])
 
+    def test_dst_summer_and_winter_market_window_edges(self):
+        # Summer CEST (UTC+2): 05:25 UTC = 07:25 CEST (window open 25 min -> active).
+        summer_open = datetime(2026, 7, 15, 5, 25, tzinfo=timezone.utc)
+        thu_summer_close = {
+            "generated_at": "2026-07-14T20:30:00Z",
+            "diagnostics": {"event_name": "schedule", "run_number": "1", "executed_at": "2026-07-14T20:30:00Z"},
+            "tickers": [{"ticker": "^NDX", "refresh_group": "market", "last_checked_at": "2026-07-14T20:30:00Z"}],
+        }
+        r_summer = mf.evaluate(thu_summer_close, thu_summer_close, summer_open, check_pages=False)
+        self.assertTrue(r_summer["market_active"])
+        self.assertAlmostEqual(r_summer["effective_age_min"], 25.0, places=1)
+        self.assertFalse(r_summer["stale"])
+
+        # Winter CET (UTC+1): 05:25 UTC = 06:25 CET (before 07:00 CET -> inactive).
+        winter_preopen = datetime(2026, 11, 20, 5, 25, tzinfo=timezone.utc)
+        thu_winter_close = {
+            "generated_at": "2026-11-19T21:30:00Z",
+            "diagnostics": {"event_name": "schedule", "run_number": "1", "executed_at": "2026-11-19T21:30:00Z"},
+            "tickers": [{"ticker": "^NDX", "refresh_group": "market", "last_checked_at": "2026-11-19T21:30:00Z"}],
+        }
+        r_winter = mf.evaluate(thu_winter_close, thu_winter_close, winter_preopen, check_pages=False)
+        self.assertFalse(r_winter["market_active"])
+        self.assertFalse(r_winter["stale"])
+
     def test_workflows_match_60m_market_hours_criteria_and_no_duplicate_comments(self):
         root = Path(__file__).resolve().parent.parent
         watch_text = (root / ".github" / "workflows" / "watch-data-freshness.yml").read_text(encoding="utf-8")
-        self.assertIn('cron: "22,52 6-22 * * 1-5"', watch_text)
+        self.assertIn('cron: "22,52 5-21 * * 1-5"', watch_text)
         self.assertIn("group: watch-dashboard-freshness", watch_text)
         self.assertIn("cancel-in-progress: false", watch_text)
         self.assertIn('"$AGE" -ge 120', watch_text)
@@ -189,8 +213,10 @@ class FreshnessTests(unittest.TestCase):
         self.assertNotIn('gh issue comment "$OPEN"', watch_text)
 
         update_text = (root / ".github" / "workflows" / "update-pages-data.yml").read_text(encoding="utf-8")
-        self.assertIn('cron: "7,37 6-22 * * 1-5"', update_text)
+        self.assertIn('cron: "7,37 5-21 * * 1-5"', update_text)
         self.assertIn('cron: "12 3 * * *"', update_text)
+        self.assertIn("ref: main", update_text)
+        self.assertIn("steps.guard.outputs.skip != 'true'", update_text)
         self.assertIn("cancel-in-progress: false", update_text)
         self.assertIn("refresh_rates", update_text)
 

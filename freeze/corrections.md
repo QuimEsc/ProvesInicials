@@ -53,3 +53,17 @@ de models financers ni estratègies:
   només a partir de `120 min` i silenci complet fora d'horari o amb preus sense canvis.
 - `docs/app.js`: llindar d'avís a `60 min` només dins d'horari de mercat i
   visualització explícita d'«Última consulta font».
+
+### v3.3 · 20/11/2026
+
+Ajust d'horaris UTC fixos per cobrir estiu (`CEST=UTC+2`) i hivern (`CET=UTC+1`)
+de la finestra `07:00–23:00 Europe/Madrid`, més control de duplicats quan
+`cron-job.org` (`workflow_dispatch`) i el cron de suport natiu coincidixen:
+
+- `.github/workflows/update-pages-data.yml`: `cron: "7,37 5-21 * * 1-5"` + `"12 3 * * *"`,
+  `ref: main` al checkout i guarda `guard` inicial per ometre execucions `schedule`
+  duplicades (`< 20 min`), `workflow_dispatch` duplicats (`< 12 min`) o franges DST
+  fora de `07:00–23:00 Europe/Madrid`.
+- `.github/workflows/watch-data-freshness.yml`: `cron: "22,52 5-21 * * 1-5"`.
+
+Impacte: **cap canvi en models financers, fórmules, web ni seguiment prospectiu**.

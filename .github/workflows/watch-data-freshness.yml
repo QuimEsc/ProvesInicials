@@ -10,7 +10,8 @@ name: Watch dashboard data freshness
 on:
   workflow_dispatch:
   schedule:
-    - cron: "22,52 6-22 * * 1-5"
+    # Covers 07:00-23:00 Europe/Madrid across both winter (CET) and summer (CEST).
+    - cron: "22,52 5-21 * * 1-5"
 
 permissions:
   contents: read

@@ -9,7 +9,9 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: "7,37 6-22 * * 1-5"
+    # Covers 07:00-23:00 Europe/Madrid across both winter (CET=UTC+1 -> 06-21 UTC)
+    # and summer (CEST=UTC+2 -> 05-20 UTC). Out-of-window DST edge hours are skipped below.
+    - cron: "7,37 5-21 * * 1-5"
     - cron: "12 3 * * *"
   push:
     branches:
@@ -54,22 +56,70 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 1
 
+      - name: Skip duplicate or out-of-window backup run
+        id: guard
+        env:
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
+          INPUT_REFRESH_RATES: ${{ inputs.refresh_rates }}
+        run: |
+          set +e
+          python3 monitor_freshness.py --manifest docs/data/manifest.json --no-pages --json-out guard_freshness.json
+          set -e
+          eval "$(python3 - << 'PY'
+          import json, os
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          sched = os.environ.get("GITHUB_EVENT_SCHEDULE", "")
+          refresh_rates = os.environ.get("INPUT_REFRESH_RATES", "false")
+          r = json.load(open("guard_freshness.json", encoding="utf-8"))
+          repo_age = r.get("repo_age_min")
+          market_active = bool(r.get("market_active"))
+
+          skip = "false"
+          reason = "Execució procedent"
+          if event_name == "schedule" and sched != "12 3 * * *":
+              if repo_age is not None and float(repo_age) < 20.0:
+                  skip = "true"
+                  reason = f"Suport schedule omés: ja existeix execució recent fa {repo_age} min."
+              elif not market_active:
+                  skip = "true"
+                  reason = "Suport schedule omés: fora de l'horari 07:00-23:00 Europe/Madrid (canvi d'hora estiu/hivern)."
+          elif event_name == "workflow_dispatch" and refresh_rates != "true":
+              if repo_age is not None and float(repo_age) < 12.0:
+                  skip = "true"
+                  reason = f"Dispatch duplicat omés: dades ja generades fa {repo_age} min."
+
+          print(f"SKIP={skip}")
+          print(f"REASON={json.dumps(reason)}")
+          PY
+          )"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "$REASON"
+          if [ "$SKIP" = "true" ]; then
+            echo "$REASON" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
       - name: Create data folder if missing
+        if: steps.guard.outputs.skip != 'true'
         run: mkdir -p dades_historiques
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: |
           pip install -r requirements.txt
 
       - name: Build static JSON data
+        if: steps.guard.outputs.skip != 'true'
         env:
           GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
@@ -81,11 +131,13 @@ jobs:
           python build_pages_data.py --base-dir . --output-dir docs/data --force-refresh $RATE_ARGS
 
       - name: Verify frozen rules, registry and daily model regressions
+        if: steps.guard.outputs.skip != 'true'
         run: |
           python prospective_tracking.py verify --base-dir .
           python -m unittest discover -s tests -v
 
       - name: Commit generated files and updated CSV history
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

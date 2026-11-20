@@ -16,9 +16,9 @@
     "docs/app.js": "c6d8b11e27abd541685ee380685e3134d72b13927cbfe511b33f878b93bbc61d",
     "docs/styles.css": "8434c67034d587aed2df289b1bb6a07225817d0f4a0c4a6c3887eb945e8a72e8",
     "requirements.txt": "15adb088cc892ec448f5e28f6e6c18eb77d5317fb116800b6c7c254a0e602ce9",
-    ".github/workflows/update-pages-data.yml": "7bf1feea828597bf763f94f1569ce0c8bdb01b0c9351ec287c1860a143821104",
+    ".github/workflows/update-pages-data.yml": "2e1ba2019fca6eb2e425c1323d80b56939c326301447bfd0b638cfcb51725642",
     "freeze/parameters.json": "3c78efac09cf1060f5fe8f69e474f0707c23f67cf6dea98de3b996d6ff4afcfd",
     "freeze/research_sources_sha256.csv": "ac283ea6b980def8d2572c5bf9f8e812fda3648aae4cf9a7e0fd5ec268ce95fa",
-    "freeze/corrections.md": "c3bda75adf60aaa8b719362d29dac6066db80ca16b5bb26feffad648dad17e89"
+    "freeze/corrections.md": "1f201d98917d43d716f307e3c31efabafb20e27fe07cdd905a6773386287ea50"
   }
 }
